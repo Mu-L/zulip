@@ -90,7 +90,7 @@ class QueryUtilTest(ZulipTestCase):
         for query in get_queries():
             # For our test to be meaningful, we want non-empty queries
             # at first
-            assert len(list(query)) > 0
+            self.assertGreater(len(list(query)), 0)
 
         queries = get_queries()
 
@@ -142,7 +142,7 @@ class QueryUtilTest(ZulipTestCase):
             len(all_msg_ids),
             len(Message.objects.exclude(sender_id=cordelia.id)),
         )
-        self.assertTrue(len(all_msg_ids) > 15)
+        self.assertGreater(len(all_msg_ids), 15)
 
         # Verify assertions about disjoint-ness.
         queries = [
@@ -477,7 +477,7 @@ class ImportExportTest(ZulipTestCase):
         exported_streams = self.get_set(data["zerver_stream"], "name")
         self.assertEqual(
             exported_streams,
-            {"Denmark", "Rome", "Scotland", "Venice", "Verona"},
+            {"Denmark", "Rome", "Scotland", "Venice", "Verona", "core team"},
         )
 
         exported_alert_words = data["zerver_alertword"]
@@ -641,6 +641,7 @@ class ImportExportTest(ZulipTestCase):
         self.assertEqual(
             exported_streams,
             {
+                "core team",
                 "Denmark",
                 "Rome",
                 "Scotland",
@@ -677,9 +678,9 @@ class ImportExportTest(ZulipTestCase):
         ).values_list("id", flat=True)
 
         # Messages from Private stream C are not exported since no member gave consent
-        private_stream_ids = Stream.objects.filter(name__in=["Private A", "Private B"]).values_list(
-            "id", flat=True
-        )
+        private_stream_ids = Stream.objects.filter(
+            name__in=["Private A", "Private B", "core team"]
+        ).values_list("id", flat=True)
         private_stream_recipients = Recipient.objects.filter(
             type_id__in=private_stream_ids, type=Recipient.STREAM
         )
@@ -942,7 +943,7 @@ class ImportExportTest(ZulipTestCase):
         # test realmauditlog
         def get_realm_audit_log_event_type(r: Realm) -> Set[str]:
             realmauditlogs = RealmAuditLog.objects.filter(realm=r).exclude(
-                event_type=RealmAuditLog.REALM_PLAN_TYPE_CHANGED
+                event_type__in=[RealmAuditLog.REALM_PLAN_TYPE_CHANGED, RealmAuditLog.STREAM_CREATED]
             )
             realmauditlog_event_type = {log.event_type for log in realmauditlogs}
             return realmauditlog_event_type

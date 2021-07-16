@@ -2,20 +2,18 @@ import $ from "jquery";
 import _ from "lodash";
 
 import render_compose from "../templates/compose.hbs";
-import render_compose_all_everyone from "../templates/compose_all_everyone.hbs";
-import render_compose_announce from "../templates/compose_announce.hbs";
 import render_compose_invite_users from "../templates/compose_invite_users.hbs";
-import render_compose_not_subscribed from "../templates/compose_not_subscribed.hbs";
 import render_compose_private_stream_alert from "../templates/compose_private_stream_alert.hbs";
 
 import * as blueslip from "./blueslip";
 import * as channel from "./channel";
 import * as common from "./common";
 import * as compose_actions from "./compose_actions";
+import * as compose_error from "./compose_error";
 import * as compose_fade from "./compose_fade";
-import * as compose_pm_pill from "./compose_pm_pill";
 import * as compose_state from "./compose_state";
 import * as compose_ui from "./compose_ui";
+import * as compose_validate from "./compose_validate";
 import * as drafts from "./drafts";
 import * as echo from "./echo";
 import * as giphy from "./giphy";
@@ -33,12 +31,11 @@ import * as rows from "./rows";
 import * as rtl from "./rtl";
 import * as sent_messages from "./sent_messages";
 import * as server_events from "./server_events";
-import * as settings_config from "./settings_config";
 import * as settings_data from "./settings_data";
 import * as stream_data from "./stream_data";
 import * as stream_edit from "./stream_edit";
+import * as stream_settings_ui from "./stream_settings_ui";
 import * as sub_store from "./sub_store";
-import * as subs from "./subs";
 import * as transmit from "./transmit";
 import * as ui_report from "./ui_report";
 import * as upload from "./upload";
@@ -55,43 +52,7 @@ import * as zcommand from "./zcommand";
    false: user typed @all/@everyone;
    true: user clicked YES */
 
-let user_acknowledged_all_everyone;
-let user_acknowledged_announce;
-let wildcard_mention;
 let uppy;
-
-export let wildcard_mention_large_stream_threshold = 15;
-export const announce_warn_threshold = 60;
-export const uploads_domain = document.location.protocol + "//" + document.location.host;
-export const uploads_path = "/user_uploads";
-
-export const uploads_re = new RegExp(
-    "\\]\\(" + uploads_domain + "(" + uploads_path + "[^\\)]+)\\)",
-    "g",
-);
-
-function make_uploads_relative(content) {
-    // Rewrite uploads in Markdown links back to domain-relative form
-    return content.replace(uploads_re, "]($1)");
-}
-
-function show_all_everyone_warnings(stream_id) {
-    const stream_count = peer_data.get_subscriber_count(stream_id) || 0;
-
-    const all_everyone_template = render_compose_all_everyone({
-        count: stream_count,
-        mention: wildcard_mention,
-    });
-    const error_area_all_everyone = $("#compose-all-everyone");
-
-    // only show one error for any number of @all or @everyone mentions
-    if (!error_area_all_everyone.is(":visible")) {
-        error_area_all_everyone.append(all_everyone_template);
-    }
-
-    error_area_all_everyone.show();
-    user_acknowledged_all_everyone = false;
-}
 
 export function compute_show_video_chat_button() {
     const available_providers = page_params.realm_available_video_chat_providers;
@@ -115,37 +76,6 @@ export function update_video_chat_button_display() {
     $(".message-edit-feature-group .video_link").toggle(show_video_chat_button);
 }
 
-export function clear_all_everyone_warnings() {
-    $("#compose-all-everyone").hide();
-    $("#compose-all-everyone").empty();
-    $("#compose-send-status").hide();
-}
-
-function show_sending_indicator(whats_happening) {
-    $("#sending-indicator").text(whats_happening);
-    $("#sending-indicator").show();
-}
-
-function show_announce_warnings(stream_id) {
-    const stream_count = peer_data.get_subscriber_count(stream_id) || 0;
-
-    const announce_template = render_compose_announce({count: stream_count});
-    const error_area_announce = $("#compose-announce");
-
-    if (!error_area_announce.is(":visible")) {
-        error_area_announce.append(announce_template);
-    }
-
-    error_area_announce.show();
-    user_acknowledged_announce = false;
-}
-
-export function clear_announce_warnings() {
-    $("#compose-announce").hide();
-    $("#compose-announce").empty();
-    $("#compose-send-status").hide();
-}
-
 export function clear_invites() {
     $("#compose_invite_users").hide();
     $("#compose_invite_users").empty();
@@ -154,14 +84,6 @@ export function clear_invites() {
 export function clear_private_stream_alert() {
     $("#compose_private_stream_alert").hide();
     $("#compose_private_stream_alert").empty();
-}
-
-export function reset_user_acknowledged_all_everyone_flag() {
-    user_acknowledged_all_everyone = undefined;
-}
-
-export function reset_user_acknowledged_announce_flag() {
-    user_acknowledged_announce = undefined;
 }
 
 export function clear_preview_area() {
@@ -209,12 +131,10 @@ export function create_message_object() {
         topic = empty_topic_placeholder();
     }
 
-    const content = make_uploads_relative(compose_state.message_content());
-
     // Changes here must also be kept in sync with echo.try_deliver_locally
     const message = {
         type: compose_state.get_message_type(),
-        content,
+        content: compose_state.message_content(),
         sender_id: page_params.user_id,
         queue_id: page_params.queue_id,
         stream: "",
@@ -258,37 +178,9 @@ export function create_message_object() {
     return message;
 }
 
-export function compose_error(error_html, bad_input) {
-    $("#compose-send-status")
-        .removeClass(common.status_classes)
-        .addClass("alert-error")
-        .stop(true)
-        .fadeTo(0, 1);
-    $("#compose-error-msg").html(error_html);
-    $("#compose-send-button").prop("disabled", false);
-    $("#sending-indicator").hide();
-    if (bad_input !== undefined) {
-        bad_input.trigger("focus").trigger("select");
-    }
-}
-
-function compose_not_subscribed_error(error_html, bad_input) {
-    $("#compose-send-status")
-        .removeClass(common.status_classes)
-        .addClass("home-error-bar")
-        .stop(true)
-        .fadeTo(0, 1);
-    $("#compose-error-msg").html(error_html);
-    $("#compose-send-button").prop("disabled", false);
-    $("#sending-indicator").hide();
-    $(".compose-send-status-close").hide();
-    if (bad_input !== undefined) {
-        bad_input.trigger("focus").trigger("select");
-    }
-}
-
 export function clear_compose_box() {
     $("#compose-textarea").val("").trigger("focus");
+    compose_validate.check_overflow_text();
     drafts.delete_active_draft();
     compose_ui.autosize_textarea($("#compose-textarea"));
     $("#compose-send-status").hide(0);
@@ -347,7 +239,7 @@ export function send_message(request = create_message_object()) {
         // If we're not local echo'ing messages, or if this message was not
         // locally echoed, show error in compose box
         if (!locally_echoed) {
-            compose_error(_.escape(response), $("#compose-textarea"));
+            compose_error.show(_.escape(response), $("#compose-textarea"));
             return;
         }
 
@@ -374,6 +266,11 @@ export function enter_with_preview_open() {
     }
 }
 
+function show_sending_indicator(whats_happening) {
+    $("#sending-indicator").text(whats_happening);
+    $("#sending-indicator").show();
+}
+
 export function finish() {
     clear_preview_area();
     clear_invites();
@@ -391,7 +288,15 @@ export function finish() {
         return undefined;
     }
 
-    if (!validate()) {
+    $("#compose-send-button").prop("disabled", true).trigger("blur");
+    if (reminder.is_deferred_delivery(message_content)) {
+        show_sending_indicator($t({defaultMessage: "Scheduling..."}));
+    } else {
+        show_sending_indicator($t({defaultMessage: "Sending..."}));
+    }
+    if (!compose_validate.validate()) {
+        // If the message failed validation, hide the sending indicator.
+        $("#sending-indicator").hide();
         return false;
     }
 
@@ -423,403 +328,6 @@ export function update_email(user_id, new_email) {
     compose_state.private_message_recipient(reply_to);
 }
 
-export function get_invalid_recipient_emails() {
-    const private_recipients = util.extract_pm_recipients(
-        compose_state.private_message_recipient(),
-    );
-    const invalid_recipients = private_recipients.filter(
-        (email) => !people.is_valid_email_for_compose(email),
-    );
-
-    return invalid_recipients;
-}
-
-function check_unsubscribed_stream_for_send(stream_name, autosubscribe) {
-    let result;
-    if (!autosubscribe) {
-        return "not-subscribed";
-    }
-
-    // In the rare circumstance of the autosubscribe option, we
-    // *Synchronously* try to subscribe to the stream before sending
-    // the message.  This is deprecated and we hope to remove it; see
-    // #4650.
-    channel.post({
-        url: "/json/subscriptions/exists",
-        data: {stream: stream_name, autosubscribe: true},
-        async: false,
-        success(data) {
-            if (data.subscribed) {
-                result = "subscribed";
-            } else {
-                result = "not-subscribed";
-            }
-        },
-        error(xhr) {
-            if (xhr.status === 404) {
-                result = "does-not-exist";
-            } else {
-                result = "error";
-            }
-        },
-    });
-    return result;
-}
-
-export function wildcard_mention_allowed() {
-    if (
-        page_params.realm_wildcard_mention_policy ===
-        settings_config.wildcard_mention_policy_values.by_everyone.code
-    ) {
-        return true;
-    }
-    if (
-        page_params.realm_wildcard_mention_policy ===
-        settings_config.wildcard_mention_policy_values.nobody.code
-    ) {
-        return false;
-    }
-    if (
-        page_params.realm_wildcard_mention_policy ===
-        settings_config.wildcard_mention_policy_values.by_stream_admins_only.code
-    ) {
-        // TODO: Check the user's stream-level role once stream-level admins exist.
-        return page_params.is_admin;
-    }
-
-    if (
-        page_params.realm_wildcard_mention_policy ===
-        settings_config.wildcard_mention_policy_values.by_moderators_only.code
-    ) {
-        return page_params.is_admin || page_params.is_moderator;
-    }
-    // TODO: Uncomment when we add support for stream-level administrators.
-    // if (
-    //     page_params.realm_wildcard_mention_policy ===
-    //     settings_config.wildcard_mention_policy_values.by_admins_only.code
-    // ) {
-    //     return page_params.is_admin;
-    // }
-    if (
-        page_params.realm_wildcard_mention_policy ===
-        settings_config.wildcard_mention_policy_values.by_full_members.code
-    ) {
-        if (page_params.is_admin) {
-            return true;
-        }
-        const person = people.get_by_user_id(page_params.user_id);
-        const current_datetime = new Date(Date.now());
-        const person_date_joined = new Date(person.date_joined);
-        const days = (current_datetime - person_date_joined) / 1000 / 86400;
-
-        return days >= page_params.realm_waiting_period_threshold && !page_params.is_guest;
-    }
-    return !page_params.is_guest;
-}
-
-export function set_wildcard_mention_large_stream_threshold(value) {
-    wildcard_mention_large_stream_threshold = value;
-}
-
-function validate_stream_message_mentions(stream_id) {
-    const stream_count = peer_data.get_subscriber_count(stream_id) || 0;
-
-    // If the user is attempting to do a wildcard mention in a large
-    // stream, check if they permission to do so.
-    if (wildcard_mention !== null && stream_count > wildcard_mention_large_stream_threshold) {
-        if (!wildcard_mention_allowed()) {
-            compose_error(
-                $t_html({
-                    defaultMessage:
-                        "You do not have permission to use wildcard mentions in this stream.",
-                }),
-            );
-            return false;
-        }
-
-        if (
-            user_acknowledged_all_everyone === undefined ||
-            user_acknowledged_all_everyone === false
-        ) {
-            // user has not seen a warning message yet if undefined
-            show_all_everyone_warnings(stream_id);
-
-            $("#compose-send-button").prop("disabled", false);
-            $("#sending-indicator").hide();
-            return false;
-        }
-    } else {
-        // the message no longer contains @all or @everyone
-        clear_all_everyone_warnings();
-    }
-    // at this point, the user has either acknowledged the warning or removed @all / @everyone
-    user_acknowledged_all_everyone = undefined;
-
-    return true;
-}
-
-function validate_stream_message_announce(sub) {
-    const stream_count = peer_data.get_subscriber_count(sub.stream_id) || 0;
-
-    if (sub.name === "announce" && stream_count > announce_warn_threshold) {
-        if (user_acknowledged_announce === undefined || user_acknowledged_announce === false) {
-            // user has not seen a warning message yet if undefined
-            show_announce_warnings(sub.stream_id);
-
-            $("#compose-send-button").prop("disabled", false);
-            $("#sending-indicator").hide();
-            return false;
-        }
-    } else {
-        clear_announce_warnings();
-    }
-    // at this point, the user has acknowledged the warning
-    user_acknowledged_announce = undefined;
-
-    return true;
-}
-
-function validate_stream_message_post_policy(sub) {
-    if (page_params.is_admin) {
-        return true;
-    }
-
-    const stream_post_permission_type = stream_data.stream_post_policy_values;
-    const stream_post_policy = sub.stream_post_policy;
-
-    if (stream_post_policy === stream_post_permission_type.admins.code) {
-        compose_error(
-            $t_html({
-                defaultMessage: "Only organization admins are allowed to post to this stream.",
-            }),
-        );
-        return false;
-    }
-
-    if (page_params.is_moderator) {
-        return true;
-    }
-
-    if (stream_post_policy === stream_post_permission_type.moderators.code) {
-        compose_error(
-            $t_html({
-                defaultMessage:
-                    "Only organization admins and moderators are allowed to post to this stream.",
-            }),
-        );
-        return false;
-    }
-
-    if (page_params.is_guest && stream_post_policy !== stream_post_permission_type.everyone.code) {
-        compose_error($t_html({defaultMessage: "Guests are not allowed to post to this stream."}));
-        return false;
-    }
-
-    const person = people.get_by_user_id(page_params.user_id);
-    const current_datetime = new Date(Date.now());
-    const person_date_joined = new Date(person.date_joined);
-    const days = (current_datetime - person_date_joined) / 1000 / 86400;
-    let error_html;
-    if (
-        stream_post_policy === stream_post_permission_type.non_new_members.code &&
-        days < page_params.realm_waiting_period_threshold
-    ) {
-        error_html = $t_html(
-            {
-                defaultMessage:
-                    "New members are not allowed to post to this stream.<br />Permission will be granted in {days} days.",
-            },
-            {days},
-        );
-        compose_error(error_html);
-        return false;
-    }
-    return true;
-}
-
-export function validation_error(error_type, stream_name) {
-    let response;
-
-    switch (error_type) {
-        case "does-not-exist":
-            response = $t_html(
-                {
-                    defaultMessage:
-                        "<p>The stream <b>{stream_name}</b> does not exist.</p><p>Manage your subscriptions <z-link>on your Streams page</z-link>.</p>",
-                },
-                {
-                    stream_name,
-                    "z-link": (content_html) => `<a href='#streams/all'>${content_html}</a>`,
-                },
-            );
-            compose_error(response, $("#stream_message_recipient_stream"));
-            return false;
-        case "error":
-            compose_error(
-                $t_html({defaultMessage: "Error checking subscription"}),
-                $("#stream_message_recipient_stream"),
-            );
-            return false;
-        case "not-subscribed": {
-            const sub = stream_data.get_sub(stream_name);
-            const new_row = render_compose_not_subscribed({
-                should_display_sub_button: stream_data.can_toggle_subscription(sub),
-            });
-            compose_not_subscribed_error(new_row, $("#stream_message_recipient_stream"));
-            return false;
-        }
-    }
-    return true;
-}
-
-export function validate_stream_message_address_info(stream_name) {
-    if (stream_data.is_subscribed(stream_name)) {
-        return true;
-    }
-    const autosubscribe = page_params.narrow_stream !== undefined;
-    const error_type = check_unsubscribed_stream_for_send(stream_name, autosubscribe);
-    return validation_error(error_type, stream_name);
-}
-
-function validate_stream_message() {
-    const stream_name = compose_state.stream_name();
-    if (stream_name === "") {
-        compose_error(
-            $t_html({defaultMessage: "Please specify a stream"}),
-            $("#stream_message_recipient_stream"),
-        );
-        return false;
-    }
-
-    if (page_params.realm_mandatory_topics) {
-        const topic = compose_state.topic();
-        if (topic === "") {
-            compose_error(
-                $t_html({defaultMessage: "Please specify a topic"}),
-                $("#stream_message_recipient_topic"),
-            );
-            return false;
-        }
-    }
-
-    const sub = stream_data.get_sub(stream_name);
-    if (!sub) {
-        return validation_error("does-not-exist", stream_name);
-    }
-
-    if (!validate_stream_message_post_policy(sub)) {
-        return false;
-    }
-
-    /* Note: This is a global and thus accessible in the functions
-       below; it's important that we update this state here before
-       proceeding with further validation. */
-    wildcard_mention = util.find_wildcard_mentions(compose_state.message_content());
-
-    // If both `@all` is mentioned and it's in `#announce`, just validate
-    // for `@all`. Users shouldn't have to hit "yes" more than once.
-    if (wildcard_mention !== null && stream_name === "announce") {
-        if (
-            !validate_stream_message_address_info(stream_name) ||
-            !validate_stream_message_mentions(sub.stream_id)
-        ) {
-            return false;
-        }
-        // If either criteria isn't met, just do the normal validation.
-    } else {
-        if (
-            !validate_stream_message_address_info(stream_name) ||
-            !validate_stream_message_mentions(sub.stream_id) ||
-            !validate_stream_message_announce(sub)
-        ) {
-            return false;
-        }
-    }
-
-    return true;
-}
-
-// The function checks whether the recipients are users of the realm or cross realm users (bots
-// for now)
-function validate_private_message() {
-    if (page_params.realm_private_message_policy === 2) {
-        // Frontend check for for PRIVATE_MESSAGE_POLICY_DISABLED
-        const user_ids = compose_pm_pill.get_user_ids();
-        if (user_ids.length !== 1 || !people.get_by_user_id(user_ids[0]).is_bot) {
-            // Unless we're composing to a bot
-            compose_error(
-                $t_html({defaultMessage: "Private messages are disabled in this organization."}),
-                $("#private_message_recipient"),
-            );
-            return false;
-        }
-    }
-
-    if (compose_state.private_message_recipient().length === 0) {
-        compose_error(
-            $t_html({defaultMessage: "Please specify at least one valid recipient"}),
-            $("#private_message_recipient"),
-        );
-        return false;
-    } else if (page_params.realm_is_zephyr_mirror_realm) {
-        // For Zephyr mirroring realms, the frontend doesn't know which users exist
-        return true;
-    }
-
-    const invalid_recipients = get_invalid_recipient_emails();
-
-    let context = {};
-    if (invalid_recipients.length === 1) {
-        context = {recipient: invalid_recipients.join(",")};
-        compose_error(
-            $t_html({defaultMessage: "The recipient {recipient} is not valid"}, context),
-            $("#private_message_recipient"),
-        );
-        return false;
-    } else if (invalid_recipients.length > 1) {
-        context = {recipients: invalid_recipients.join(",")};
-        compose_error(
-            $t_html({defaultMessage: "The recipients {recipients} are not valid"}, context),
-            $("#private_message_recipient"),
-        );
-        return false;
-    }
-    return true;
-}
-
-export function validate() {
-    $("#compose-send-button").prop("disabled", true).trigger("blur");
-    const message_content = compose_state.message_content();
-    if (reminder.is_deferred_delivery(message_content)) {
-        show_sending_indicator($t({defaultMessage: "Scheduling..."}));
-    } else {
-        show_sending_indicator($t({defaultMessage: "Sending..."}));
-    }
-
-    if (/^\s*$/.test(message_content)) {
-        compose_error(
-            $t_html({defaultMessage: "You have nothing to send!"}),
-            $("#compose-textarea"),
-        );
-        return false;
-    }
-
-    if ($("#zephyr-mirror-error").is(":visible")) {
-        compose_error(
-            $t_html({
-                defaultMessage:
-                    "You need to be running Zephyr mirroring in order to send messages!",
-            }),
-        );
-        return false;
-    }
-
-    if (compose_state.get_message_type() === "private") {
-        return validate_private_message();
-    }
-    return validate_stream_message();
-}
-
 export function handle_keydown(event, textarea) {
     // The event.key property will have uppercase letter if
     // the "Shift + <key>" combo was used or the Caps Lock
@@ -835,30 +343,32 @@ export function handle_keydown(event, textarea) {
 
     if ((isBold || isItalic || isLink) && isCmdOrCtrl) {
         const range = textarea.range();
-        function wrap_text_with_markdown(prefix, suffix) {
-            if (!document.execCommand("insertText", false, prefix + range.text + suffix)) {
-                textarea.range(range.start, range.end).range(prefix + range.text + suffix);
-            }
-            event.preventDefault();
-        }
 
         if (isBold) {
             // Ctrl + B: Convert selected text to bold text
-            wrap_text_with_markdown("**", "**");
+            compose_ui.wrap_text_with_markdown(textarea, "**", "**");
+            event.preventDefault();
+
             if (!range.length) {
                 textarea.caret(textarea.caret() - 2);
             }
         }
+
         if (isItalic) {
             // Ctrl + I: Convert selected text to italic text
-            wrap_text_with_markdown("*", "*");
+            compose_ui.wrap_text_with_markdown(textarea, "*", "*");
+            event.preventDefault();
+
             if (!range.length) {
                 textarea.caret(textarea.caret() - 1);
             }
         }
+
         if (isLink) {
             // Ctrl + L: Insert a link to selected text
-            wrap_text_with_markdown("[", "](url)");
+            compose_ui.wrap_text_with_markdown(textarea, "[", "](url)");
+            event.preventDefault();
+
             const position = textarea.caret();
             const txt = textarea[0];
 
@@ -1117,6 +627,10 @@ export function initialize() {
         handle_keyup(event, $("#compose-textarea").expectOne());
     });
 
+    $("#compose-textarea").on("input propertychange", () => {
+        compose_validate.check_overflow_text();
+    });
+
     $("#compose form").on("submit", (e) => {
         e.preventDefault();
         finish();
@@ -1130,8 +644,8 @@ export function initialize() {
         event.preventDefault();
 
         $(event.target).parents(".compose-all-everyone").remove();
-        user_acknowledged_all_everyone = true;
-        clear_all_everyone_warnings();
+        compose_validate.set_user_acknowledged_all_everyone_flag(true);
+        compose_validate.clear_all_everyone_warnings();
         finish();
     });
 
@@ -1139,8 +653,8 @@ export function initialize() {
         event.preventDefault();
 
         $(event.target).parents(".compose-announce").remove();
-        user_acknowledged_announce = true;
-        clear_announce_warnings();
+        compose_validate.set_user_acknowledged_announce_flag(true);
+        compose_validate.clear_announce_warnings();
         finish();
     });
 
@@ -1152,7 +666,7 @@ export function initialize() {
             return;
         }
         const sub = stream_data.get_sub(stream_name);
-        subs.sub_or_unsub(sub);
+        stream_settings_ui.sub_or_unsub(sub);
         $("#compose-send-status").hide();
     });
 
@@ -1181,7 +695,7 @@ export function initialize() {
 
         function failure(error_msg) {
             clear_invites();
-            compose_error(_.escape(error_msg), $("#compose-textarea"));
+            compose_error.show(_.escape(error_msg), $("#compose-textarea"));
             $(event.target).prop("disabled", true);
         }
 
@@ -1327,6 +841,16 @@ export function initialize() {
     $("#compose").on("click", ".undo_markdown_preview", (e) => {
         e.preventDefault();
         clear_preview_area();
+    });
+
+    $("#compose").on("click", ".expand_composebox_button", (e) => {
+        e.preventDefault();
+        compose_ui.make_compose_box_full_size();
+    });
+
+    $("#compose").on("click", ".collapse_composebox_button", (e) => {
+        e.preventDefault();
+        compose_ui.make_compose_box_original_size();
     });
 
     uppy = upload.setup_upload({

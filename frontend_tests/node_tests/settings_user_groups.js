@@ -4,9 +4,8 @@ const {strict: assert} = require("assert");
 
 const _ = require("lodash");
 
-const {stub_templates} = require("../zjsunit/handlebars");
 const {$t} = require("../zjsunit/i18n");
-const {mock_cjs, mock_esm, set_global, zrequire} = require("../zjsunit/namespace");
+const {mock_esm, set_global, zrequire} = require("../zjsunit/namespace");
 const {run_test} = require("../zjsunit/test");
 const blueslip = require("../zjsunit/zblueslip");
 const $ = require("../zjsunit/zjquery");
@@ -20,7 +19,6 @@ const pills = {
 
 let create_item_handler;
 
-mock_cjs("jquery", $);
 const channel = mock_esm("../../static/js/channel");
 const confirm_dialog = mock_esm("../../static/js/confirm_dialog");
 const input_pill = mock_esm("../../static/js/input_pill");
@@ -34,6 +32,7 @@ const ui_report = mock_esm("../../static/js/ui_report");
 
 const people = zrequire("people");
 const settings_config = zrequire("settings_config");
+const settings_data = zrequire("settings_data");
 const settings_user_groups = zrequire("settings_user_groups");
 const user_pill = zrequire("user_pill");
 
@@ -53,16 +52,10 @@ function test_ui(label, f) {
 }
 
 test_ui("can_edit", () => {
-    page_params.is_guest = false;
-    page_params.is_admin = true;
-    assert.ok(settings_user_groups.can_edit(1));
-
-    page_params.is_admin = false;
-    page_params.is_guest = true;
+    settings_data.user_can_edit_user_groups = () => false;
     assert.ok(!settings_user_groups.can_edit(1));
 
-    page_params.is_guest = false;
-    page_params.is_admin = false;
+    settings_data.user_can_edit_user_groups = () => true;
     user_groups.is_member_of = (group_id, user_id) => {
         assert.equal(group_id, 1);
         assert.equal(user_id, undefined);
@@ -70,20 +63,15 @@ test_ui("can_edit", () => {
     };
     assert.ok(!settings_user_groups.can_edit(1));
 
-    page_params.realm_user_group_edit_policy = 2;
     page_params.is_admin = true;
     assert.ok(settings_user_groups.can_edit(1));
 
     page_params.is_admin = false;
-    user_groups.is_member_of = (group_id, user_id) => {
-        assert.equal(group_id, 1);
-        assert.equal(user_id, undefined);
-        return true;
-    };
-    assert.ok(!settings_user_groups.can_edit(1));
+    page_params.is_moderator = true;
+    assert.ok(settings_user_groups.can_edit(1));
 
-    page_params.realm_user_group_edit_policy = 1;
     page_params.is_admin = false;
+    page_params.is_moderator = false;
     user_groups.is_member_of = (group_id, user_id) => {
         assert.equal(group_id, 1);
         assert.equal(user_id, undefined);
@@ -99,7 +87,7 @@ const name_selector = `#user-groups #${CSS.escape(1)} .name`;
 const description_selector = `#user-groups #${CSS.escape(1)} .description`;
 const instructions_selector = `#user-groups #${CSS.escape(1)} .save-instructions`;
 
-test_ui("populate_user_groups", (override) => {
+test_ui("populate_user_groups", ({override, mock_template}) => {
     const realm_user_group = {
         id: 1,
         name: "Mobile",
@@ -122,6 +110,10 @@ test_ui("populate_user_groups", (override) => {
         full_name: "Bob",
     };
 
+    people.add_active_user(iago);
+    people.add_active_user(alice);
+    people.add_active_user(bob);
+
     people.get_realm_users = () => [iago, alice, bob];
 
     user_groups.get_realm_user_groups = () => [realm_user_group];
@@ -130,8 +122,7 @@ test_ui("populate_user_groups", (override) => {
 
     let templates_render_called = false;
     const fake_rendered_temp = $.create("fake_admin_user_group_list_template_rendered");
-    stub_templates((template, args) => {
-        assert.equal(template, "settings/admin_user_group_list");
+    mock_template("settings/admin_user_group_list.hbs", false, (args) => {
         assert.equal(args.user_group.id, 1);
         assert.equal(args.user_group.name, "Mobile");
         assert.equal(args.user_group.description, "All mobile people");
@@ -323,6 +314,18 @@ test_ui("populate_user_groups", (override) => {
             assert.equal(res.user_id, bob.user_id);
             assert.equal(res.display_value, bob.full_name);
         })();
+
+        (function test_deactivated_pill() {
+            people.deactivate(bob);
+            get_by_email_called = false;
+            const res = handler(bob.email, pills.items());
+            assert.ok(get_by_email_called);
+            assert.equal(typeof res, "object");
+            assert.equal(res.user_id, bob.user_id);
+            assert.equal(res.display_value, bob.full_name + " (deactivated)");
+            assert.ok(res.deactivated);
+            people.add_active_user(bob);
+        })();
     }
 
     pills.onPillRemove = (handler) => {
@@ -352,7 +355,7 @@ test_ui("populate_user_groups", (override) => {
         "function",
     );
 });
-test_ui("with_external_user", (override) => {
+test_ui("with_external_user", ({override, mock_template}) => {
     const realm_user_group = {
         id: 1,
         name: "Mobile",
@@ -365,7 +368,11 @@ test_ui("with_external_user", (override) => {
     // We return noop because these are already tested, so we skip them
     people.get_realm_users = () => noop;
 
-    stub_templates(() => noop);
+    mock_template(
+        "settings/admin_user_group_list.hbs",
+        false,
+        () => "settings/admin_user_group_list.hbs",
+    );
 
     people.get_by_user_id = () => noop;
 
@@ -486,7 +493,7 @@ test_ui("with_external_user", (override) => {
     assert.equal(turned_off["click/whole"], true);
 });
 
-test_ui("reload", (override) => {
+test_ui("reload", ({override}) => {
     $("#user-groups").html("Some text");
     let populate_user_groups_called = false;
     override(settings_user_groups, "populate_user_groups", () => {
@@ -503,7 +510,14 @@ test_ui("reset", () => {
     assert.equal(result, undefined);
 });
 
-test_ui("on_events", (override) => {
+test_ui("on_events", ({override, mock_template}) => {
+    mock_template("confirm_dialog/confirm_delete_user.hbs", false, (data) => {
+        assert.deepEqual(data, {
+            group_name: "Mobile",
+        });
+        return "stub";
+    });
+
     override(settings_user_groups, "can_edit", () => true);
 
     (function test_admin_user_group_form_submit_triggered() {

@@ -2,7 +2,7 @@
 
 const {strict: assert} = require("assert");
 
-const {mock_cjs, mock_esm, set_global, with_field, zrequire} = require("../zjsunit/namespace");
+const {mock_esm, set_global, with_field, zrequire} = require("../zjsunit/namespace");
 const {make_stub} = require("../zjsunit/stub");
 const {run_test} = require("../zjsunit/test");
 const blueslip = require("../zjsunit/zblueslip");
@@ -20,7 +20,6 @@ const typing_person1 = events.typing_person1;
 
 set_global("setTimeout", (func) => func());
 
-mock_cjs("jquery", $);
 const activity = mock_esm("../../static/js/activity");
 const alert_words_ui = mock_esm("../../static/js/alert_words_ui");
 const attachments_ui = mock_esm("../../static/js/attachments_ui");
@@ -33,7 +32,8 @@ const message_edit = mock_esm("../../static/js/message_edit");
 const message_events = mock_esm("../../static/js/message_events");
 const message_list = mock_esm("../../static/js/message_list");
 const message_lists = mock_esm("../../static/js/message_lists");
-const muting_ui = mock_esm("../../static/js/muting_ui");
+const muted_topics_ui = mock_esm("../../static/js/muted_topics_ui");
+const muted_users_ui = mock_esm("../../static/js/muted_users_ui");
 const night_mode = mock_esm("../../static/js/night_mode");
 const notifications = mock_esm("../../static/js/notifications");
 const reactions = mock_esm("../../static/js/reactions");
@@ -113,7 +113,7 @@ function assert_same(actual, expected) {
     assert.deepEqual(actual, expected);
 }
 
-run_test("alert_words", (override) => {
+run_test("alert_words", ({override}) => {
     alert_words.initialize({alert_words: []});
     assert.ok(!alert_words.has_alert_word("fire"));
     assert.ok(!alert_words.has_alert_word("lunch"));
@@ -127,7 +127,7 @@ run_test("alert_words", (override) => {
     assert.ok(alert_words.has_alert_word("lunch"));
 });
 
-run_test("attachments", (override) => {
+run_test("attachments", ({override}) => {
     const event = event_fixtures.attachment__add;
     const stub = make_stub();
     // attachments_ui is hard to test deeply
@@ -137,7 +137,7 @@ run_test("attachments", (override) => {
     assert_same(stub.get_args("event").event, event);
 });
 
-run_test("user groups", (override) => {
+run_test("user groups", ({override}) => {
     let event = event_fixtures.user_group__add;
     override(settings_user_groups, "reload", noop);
     {
@@ -195,7 +195,7 @@ run_test("user groups", (override) => {
     }
 });
 
-run_test("custom profile fields", (override) => {
+run_test("custom profile fields", ({override}) => {
     const event = event_fixtures.custom_profile_fields;
     override(settings_profile_fields, "populate_profile_fields", noop);
     override(settings_account, "add_custom_profile_fields_to_settings", noop);
@@ -203,7 +203,7 @@ run_test("custom profile fields", (override) => {
     assert_same(page_params.custom_profile_fields, event.fields);
 });
 
-run_test("default_streams", (override) => {
+run_test("default_streams", ({override}) => {
     const event = event_fixtures.default_streams;
     override(settings_streams, "update_default_streams_table", noop);
     const stub = make_stub();
@@ -214,7 +214,7 @@ run_test("default_streams", (override) => {
     assert_same(args.realm_default_streams, event.default_streams);
 });
 
-run_test("hotspots", (override) => {
+run_test("hotspots", ({override}) => {
     page_params.hotspots = [];
     const event = event_fixtures.hotspots;
     override(hotspots, "load_new", noop);
@@ -222,7 +222,7 @@ run_test("hotspots", (override) => {
     assert_same(page_params.hotspots, event.hotspots);
 });
 
-run_test("invites_changed", (override) => {
+run_test("invites_changed", ({override}) => {
     $.create("#admin-invites-list", {children: ["stub"]});
     const event = event_fixtures.invites_changed;
     const stub = make_stub();
@@ -231,29 +231,29 @@ run_test("invites_changed", (override) => {
     assert.equal(stub.num_calls, 1);
 });
 
-run_test("muted_topics", (override) => {
+run_test("muted_topics", ({override}) => {
     const event = event_fixtures.muted_topics;
 
     const stub = make_stub();
-    override(muting_ui, "handle_topic_updates", stub.f);
+    override(muted_topics_ui, "handle_topic_updates", stub.f);
     dispatch(event);
     assert.equal(stub.num_calls, 1);
     const args = stub.get_args("muted_topics");
     assert_same(args.muted_topics, event.muted_topics);
 });
 
-run_test("muted_users", (override) => {
+run_test("muted_users", ({override}) => {
     const event = event_fixtures.muted_users;
 
     const stub = make_stub();
-    override(muting_ui, "handle_user_updates", stub.f);
+    override(muted_users_ui, "handle_user_updates", stub.f);
     dispatch(event);
     assert.equal(stub.num_calls, 1);
     const args = stub.get_args("muted_users");
     assert_same(args.muted_users, event.muted_users);
 });
 
-run_test("presence", (override) => {
+run_test("presence", ({override}) => {
     const event = event_fixtures.presence;
 
     const stub = make_stub();
@@ -266,7 +266,7 @@ run_test("presence", (override) => {
     assert_same(args.server_time, event.server_timestamp);
 });
 
-run_test("reaction", (override) => {
+run_test("reaction", ({override}) => {
     let event = event_fixtures.reaction__add;
     {
         const stub = make_stub();
@@ -290,7 +290,7 @@ run_test("reaction", (override) => {
     }
 });
 
-run_test("realm settings", (override) => {
+run_test("realm settings", ({override}) => {
     page_params.is_admin = true;
 
     override(settings_org, "sync_realm_settings", noop);
@@ -428,7 +428,7 @@ run_test("realm settings", (override) => {
     assert_same(window.location.href, "/accounts/deactivated/");
 });
 
-run_test("realm_bot add", (override) => {
+run_test("realm_bot add", ({override}) => {
     const event = event_fixtures.realm_bot__add;
     const bot_stub = make_stub();
     const admin_stub = make_stub();
@@ -444,7 +444,7 @@ run_test("realm_bot add", (override) => {
     admin_stub.get_args("update_user_id", "update_bot_data");
 });
 
-run_test("realm_bot remove", (override) => {
+run_test("realm_bot remove", ({override}) => {
     const event = event_fixtures.realm_bot__remove;
     const bot_stub = make_stub();
     const admin_stub = make_stub();
@@ -466,7 +466,7 @@ run_test("realm_bot delete", () => {
     dispatch(event);
 });
 
-run_test("realm_bot update", (override) => {
+run_test("realm_bot update", ({override}) => {
     const event = event_fixtures.realm_bot__update;
     const bot_stub = make_stub();
     const admin_stub = make_stub();
@@ -486,7 +486,7 @@ run_test("realm_bot update", (override) => {
     assert_same(args.update_user_id, event.bot.user_id);
 });
 
-run_test("realm_emoji", (override) => {
+run_test("realm_emoji", ({override}) => {
     const event = event_fixtures.realm_emoji__update;
 
     const ui_func_names = [
@@ -519,7 +519,7 @@ run_test("realm_emoji", (override) => {
     }
 });
 
-run_test("realm_linkifiers", (override) => {
+run_test("realm_linkifiers", ({override}) => {
     const event = event_fixtures.realm_linkifiers;
     page_params.realm_linkifiers = [];
     override(settings_linkifiers, "populate_linkifiers", noop);
@@ -528,7 +528,7 @@ run_test("realm_linkifiers", (override) => {
     assert_same(page_params.realm_linkifiers, event.realm_linkifiers);
 });
 
-run_test("realm_playgrounds", (override) => {
+run_test("realm_playgrounds", ({override}) => {
     const event = event_fixtures.realm_playgrounds;
     page_params.realm_playgrounds = [];
     override(settings_playgrounds, "populate_playgrounds", noop);
@@ -537,7 +537,7 @@ run_test("realm_playgrounds", (override) => {
     assert_same(page_params.realm_playgrounds, event.realm_playgrounds);
 });
 
-run_test("realm_domains", (override) => {
+run_test("realm_domains", ({override}) => {
     let event = event_fixtures.realm_domains__add;
     page_params.realm_domains = [];
     override(settings_org, "populate_realm_domains", noop);
@@ -555,7 +555,7 @@ run_test("realm_domains", (override) => {
     assert_same(page_params.realm_domains, []);
 });
 
-run_test("realm_user", (override) => {
+run_test("realm_user", ({override}) => {
     let event = event_fixtures.realm_user__add;
     dispatch({...event});
     const added_person = people.get_by_user_id(event.person.user_id);
@@ -587,7 +587,7 @@ run_test("realm_user", (override) => {
     assert_same(args.person, event.person);
 });
 
-run_test("restart", (override) => {
+run_test("restart", ({override}) => {
     const event = event_fixtures.restart;
     const stub = make_stub();
     override(reload, "initiate", stub.f);
@@ -598,7 +598,7 @@ run_test("restart", (override) => {
     assert.equal(args.options.immediate, true);
 });
 
-run_test("submessage", (override) => {
+run_test("submessage", ({override}) => {
     const event = event_fixtures.submessage;
     const stub = make_stub();
     override(submessage, "handle_event", stub.f);
@@ -616,7 +616,7 @@ run_test("submessage", (override) => {
 
 // For subscriptions, see dispatch_subs.js
 
-run_test("typing", (override) => {
+run_test("typing", ({override}) => {
     // Simulate that we are not typing.
     page_params.user_id = typing_person1.user_id + 1;
 
@@ -646,7 +646,8 @@ run_test("typing", (override) => {
     dispatch(event);
 });
 
-run_test("update_display_settings", (override) => {
+run_test("update_display_settings", ({override}) => {
+    settings_display.set_default_language_name = () => {};
     let event = event_fixtures.update_display_settings__default_language;
     page_params.default_language = "en";
     override(settings_display, "update_page", noop);
@@ -789,7 +790,7 @@ run_test("update_display_settings", (override) => {
     }
 });
 
-run_test("update_global_notifications", (override) => {
+run_test("update_global_notifications", ({override}) => {
     const event = event_fixtures.update_global_notifications;
     const stub = make_stub();
     override(notifications, "handle_global_notification_updates", stub.f);
@@ -801,7 +802,7 @@ run_test("update_global_notifications", (override) => {
     assert_same(args.setting, event.setting);
 });
 
-run_test("update_message (read)", (override) => {
+run_test("update_message (read)", ({override}) => {
     const event = event_fixtures.update_message_flags__read;
 
     const stub = make_stub();
@@ -812,7 +813,7 @@ run_test("update_message (read)", (override) => {
     assert_same(args.message_ids, [999]);
 });
 
-run_test("update_message (add star)", (override) => {
+run_test("update_message (add star)", ({override}) => {
     override(starred_messages, "rerender_ui", noop);
 
     const event = event_fixtures.update_message_flags__starred_add;
@@ -827,7 +828,7 @@ run_test("update_message (add star)", (override) => {
     assert.equal(msg.starred, true);
 });
 
-run_test("update_message (remove star)", (override) => {
+run_test("update_message (remove star)", ({override}) => {
     override(starred_messages, "rerender_ui", noop);
     const event = event_fixtures.update_message_flags__starred_remove;
     const stub = make_stub();
@@ -841,7 +842,7 @@ run_test("update_message (remove star)", (override) => {
     assert.equal(msg.starred, false);
 });
 
-run_test("update_message (wrong data)", (override) => {
+run_test("update_message (wrong data)", ({override}) => {
     override(starred_messages, "rerender_ui", noop);
     const event = {
         ...event_fixtures.update_message_flags__starred_add,
@@ -851,7 +852,7 @@ run_test("update_message (wrong data)", (override) => {
     // update_starred_view never gets invoked, early return is successful
 });
 
-run_test("delete_message", (override) => {
+run_test("delete_message", ({override}) => {
     const event = event_fixtures.delete_message;
 
     override(stream_list, "update_streams_sidebar", noop);
@@ -882,7 +883,7 @@ run_test("delete_message", (override) => {
     assert_same(args.opts.max_removed_msg_id, 1337);
 });
 
-run_test("user_status", (override) => {
+run_test("user_status", ({override}) => {
     let event = event_fixtures.user_status__set_away;
     {
         const stub = make_stub();
@@ -916,7 +917,7 @@ run_test("user_status", (override) => {
     }
 });
 
-run_test("realm_export", (override) => {
+run_test("realm_export", ({override}) => {
     const event = event_fixtures.realm_export;
     const stub = make_stub();
     override(settings_exports, "populate_exports_table", stub.f);
@@ -927,7 +928,7 @@ run_test("realm_export", (override) => {
     assert.equal(args.exports, event.exports);
 });
 
-run_test("server_event_dispatch_op_errors", (override) => {
+run_test("server_event_dispatch_op_errors", ({override}) => {
     blueslip.expect("error", "Unexpected event type subscription/other");
     server_events_dispatch.dispatch_normal_event({type: "subscription", op: "other"});
     blueslip.expect("error", "Unexpected event type reaction/other");

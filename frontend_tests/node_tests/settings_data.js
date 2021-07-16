@@ -118,6 +118,14 @@ run_test("user_can_change_logo", () => {
     assert.equal(can_change_logo(), false);
 });
 
+run_test("user_can_unsubscribe_other_users", () => {
+    page_params.is_admin = true;
+    assert.equal(settings_data.user_can_unsubscribe_other_users(), true);
+
+    page_params.is_admin = false;
+    assert.equal(settings_data.user_can_unsubscribe_other_users(), false);
+});
+
 function test_policy(label, policy, validation_func) {
     run_test(label, () => {
         page_params.is_admin = true;
@@ -173,3 +181,74 @@ test_policy(
     "realm_move_messages_between_streams_policy",
     settings_data.user_can_move_messages_between_streams,
 );
+test_policy(
+    "user_can_edit_user_groups",
+    "realm_user_group_edit_policy",
+    settings_data.user_can_edit_user_groups,
+);
+
+function test_message_policy(label, policy, validation_func) {
+    run_test(label, () => {
+        page_params.is_admin = true;
+        page_params[policy] = settings_config.common_message_policy_values.by_admins_only.code;
+        assert.equal(validation_func(), true);
+
+        page_params.is_admin = false;
+        page_params.is_moderator = true;
+        assert.equal(validation_func(), false);
+
+        page_params[policy] = settings_config.common_message_policy_values.by_moderators_only.code;
+        assert.equal(validation_func(), true);
+
+        page_params.is_moderator = false;
+        assert.equal(validation_func(), false);
+
+        page_params.is_guest = true;
+        page_params[policy] = settings_config.common_message_policy_values.by_everyone.code;
+        assert.equal(validation_func(), true);
+
+        page_params[policy] = settings_config.common_message_policy_values.by_members.code;
+        assert.equal(validation_func(), false);
+
+        page_params.is_guest = false;
+        assert.equal(validation_func(), true);
+
+        page_params[policy] = settings_config.common_message_policy_values.by_full_members.code;
+        page_params.user_id = 30;
+        people.add_active_user(isaac);
+        isaac.date_joined = new Date(Date.now());
+        page_params.realm_waiting_period_threshold = 10;
+        assert.equal(validation_func(), false);
+
+        isaac.date_joined = new Date(Date.now() - 20 * 86400000);
+        assert.equal(validation_func(), true);
+    });
+}
+
+test_message_policy(
+    "user_can_edit_topic_of_any_message",
+    "realm_edit_topic_policy",
+    settings_data.user_can_edit_topic_of_any_message,
+);
+
+run_test("using_dark_theme", () => {
+    page_params.color_scheme = settings_config.color_scheme_values.night.code;
+    assert.equal(settings_data.using_dark_theme(), true);
+
+    page_params.color_scheme = settings_config.color_scheme_values.automatic.code;
+
+    window.matchMedia = (query) => {
+        assert.equal(query, "(prefers-color-scheme: dark)");
+        return {matches: true};
+    };
+    assert.equal(settings_data.using_dark_theme(), true);
+
+    window.matchMedia = (query) => {
+        assert.equal(query, "(prefers-color-scheme: dark)");
+        return {matches: false};
+    };
+    assert.equal(settings_data.using_dark_theme(), false);
+
+    page_params.color_scheme = settings_config.color_scheme_values.day.code;
+    assert.equal(settings_data.using_dark_theme(), false);
+});

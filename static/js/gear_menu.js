@@ -1,10 +1,13 @@
 import $ from "jquery";
 
+import render_gear_menu from "../templates/gear_menu.hbs";
+
 import * as hashchange from "./hashchange";
 import {$t} from "./i18n";
 import * as message_viewport from "./message_viewport";
 import * as navigate from "./navigate";
 import {page_params} from "./page_params";
+import * as settings_data from "./settings_data";
 
 /*
 For various historical reasons there isn't one
@@ -96,6 +99,11 @@ export function update_org_settings_menu_item() {
 }
 
 export function initialize() {
+    const rendered_gear_menu = render_gear_menu({
+        ...page_params,
+        can_invite_others_to_realm: settings_data.user_can_invite_others_to_realm(),
+    });
+    $("#navbar-buttons").html(rendered_gear_menu);
     update_org_settings_menu_item();
 
     $('#gear-menu a[data-toggle="tab"]').on("show", (e) => {

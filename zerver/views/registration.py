@@ -36,7 +36,7 @@ from zerver.forms import (
 )
 from zerver.lib.actions import (
     bulk_add_subscriptions,
-    do_activate_user,
+    do_activate_mirror_dummy_user,
     do_change_full_name,
     do_change_password,
     do_create_realm,
@@ -308,7 +308,8 @@ def accounts_register(request: HttpRequest) -> HttpResponse:
         if realm_creation:
             string_id = form.cleaned_data["realm_subdomain"]
             realm_name = form.cleaned_data["realm_name"]
-            realm = do_create_realm(string_id, realm_name)
+            realm_type = form.cleaned_data["realm_type"]
+            realm = do_create_realm(string_id, realm_name, org_type=realm_type)
             setup_realm_internal_bots(realm)
         assert realm is not None
 
@@ -406,11 +407,11 @@ def accounts_register(request: HttpRequest) -> HttpResponse:
 
         if existing_user_profile is not None and existing_user_profile.is_mirror_dummy:
             user_profile = existing_user_profile
-            do_activate_user(user_profile, acting_user=user_profile)
+            do_activate_mirror_dummy_user(user_profile, acting_user=user_profile)
             do_change_password(user_profile, password)
             do_change_full_name(user_profile, full_name, user_profile)
             do_set_user_display_setting(user_profile, "timezone", timezone)
-            # TODO: When we clean up the `do_activate_user` code path,
+            # TODO: When we clean up the `do_activate_mirror_dummy_user` code path,
             # make it respect invited_as_admin / is_realm_admin.
 
         if user_profile is None:
@@ -484,6 +485,9 @@ def accounts_register(request: HttpRequest) -> HttpResponse:
             "MAX_NAME_LENGTH": str(UserProfile.MAX_NAME_LENGTH),
             "MAX_PASSWORD_LENGTH": str(form.MAX_PASSWORD_LENGTH),
             "MAX_REALM_SUBDOMAIN_LENGTH": str(Realm.MAX_REALM_SUBDOMAIN_LENGTH),
+            "sorted_realm_types": sorted(
+                Realm.ORG_TYPES.values(), key=lambda d: d["display_order"]
+            ),
         },
     )
 

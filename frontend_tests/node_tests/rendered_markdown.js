@@ -2,7 +2,6 @@
 
 const {strict: assert} = require("assert");
 
-const {stub_templates} = require("../zjsunit/handlebars");
 const {mock_cjs, mock_esm, with_field, zrequire} = require("../zjsunit/namespace");
 const {run_test} = require("../zjsunit/test");
 const blueslip = require("../zjsunit/zblueslip");
@@ -17,7 +16,6 @@ class Clipboard {
 }
 
 mock_cjs("clipboard", Clipboard);
-mock_cjs("jquery", $);
 
 const realm_playground = mock_esm("../../static/js/realm_playground");
 page_params.emojiset = "apple";
@@ -250,7 +248,17 @@ run_test("timestamp without time", () => {
     assert.equal($timestamp.text(), "never-been-set");
 });
 
-run_test("timestamp", () => {
+run_test("timestamp", ({mock_template}) => {
+    mock_template("markdown_timestamp.hbs", true, (data, html) => {
+        assert.deepEqual(data, {text: "Thu, Jan 1 1970, 12:00 AM"});
+        return html;
+    });
+
+    mock_template("markdown_time_tooltip.hbs", true, (data, html) => {
+        assert.deepEqual(data, {tz_offset_str: "UTC"});
+        return html;
+    });
+
     // Setup
     const $content = get_content_element();
     const $timestamp = $.create("timestamp(valid)");
@@ -269,13 +277,23 @@ run_test("timestamp", () => {
     // Final asserts
     assert.equal($timestamp.html(), '<i class="fa fa-clock-o"></i>\nThu, Jan 1 1970, 12:00 AM\n');
     assert.equal(
-        $timestamp.attr("title"),
-        "This time is in your timezone. Original text was 'never-been-set'.",
+        $timestamp.attr("data-tippy-content"),
+        "Everyone sees this in their own time zone.\n<br/>\nYour time zone: UTC\n",
     );
     assert.equal($timestamp_invalid.text(), "never-been-set");
 });
 
-run_test("timestamp-twenty-four-hour-time", () => {
+run_test("timestamp-twenty-four-hour-time", ({mock_template}) => {
+    mock_template("markdown_timestamp.hbs", true, (data, html) => {
+        // sanity check incoming data
+        assert.ok(data.text.startsWith("Wed, Jul 15 2020, "));
+        return html;
+    });
+
+    mock_template("markdown_time_tooltip.hbs", false, (data) => {
+        assert.deepEqual(data, {tz_offset_str: "UTC"});
+    });
+
     const $content = get_content_element();
     const $timestamp = $.create("timestamp");
     $timestamp.attr("datetime", "2020-07-15T20:40:00Z");
@@ -378,7 +396,7 @@ function assert_clipboard_setup() {
     assert.equal(text, "text");
 }
 
-function test_code_playground() {
+function test_code_playground(mock_template, viewing_code) {
     const $content = get_content_element();
     const $hilite = $.create("div.codehilite");
     const $pre = $.create("hilite-pre");
@@ -402,18 +420,17 @@ function test_code_playground() {
         prepends.push(arg);
     };
 
-    stub_templates((template_name, data) => {
-        switch (template_name) {
-            case "copy_code_button":
-                assert.equal(data, undefined);
-                return {to_$: () => $copy_code_button};
-            case "view_code_in_playground":
-                assert.equal(data, undefined);
-                return {to_$: () => $view_code_in_playground};
-            default:
-                throw new Error(`unexpected template_name ${template_name}`);
-        }
+    mock_template("copy_code_button.hbs", false, (data) => {
+        assert.equal(data, undefined);
+        return {to_$: () => $copy_code_button};
     });
+
+    if (viewing_code) {
+        mock_template("view_code_in_playground.hbs", false, (data) => {
+            assert.equal(data, undefined);
+            return {to_$: () => $view_code_in_playground};
+        });
+    }
 
     rm.update_elements($content);
 
@@ -424,13 +441,13 @@ function test_code_playground() {
     };
 }
 
-run_test("code playground none", (override) => {
+run_test("code playground none", ({override, mock_template}) => {
     override(realm_playground, "get_playground_info_for_languages", (language) => {
         assert.equal(language, "javascript");
         return undefined;
     });
 
-    const {prepends, copy_code, view_code} = test_code_playground();
+    const {prepends, copy_code, view_code} = test_code_playground(mock_template, false);
     assert.deepEqual(prepends, [copy_code]);
     assert_clipboard_setup();
 
@@ -438,13 +455,13 @@ run_test("code playground none", (override) => {
     assert.equal(view_code.attr("aria-label"), undefined);
 });
 
-run_test("code playground single", (override) => {
+run_test("code playground single", ({override, mock_template}) => {
     override(realm_playground, "get_playground_info_for_languages", (language) => {
         assert.equal(language, "javascript");
         return [{name: "Some Javascript Playground"}];
     });
 
-    const {prepends, copy_code, view_code} = test_code_playground();
+    const {prepends, copy_code, view_code} = test_code_playground(mock_template, true);
     assert.deepEqual(prepends, [view_code, copy_code]);
     assert_clipboard_setup();
 
@@ -456,13 +473,13 @@ run_test("code playground single", (override) => {
     assert.equal(view_code.attr("aria-haspopup"), undefined);
 });
 
-run_test("code playground multiple", (override) => {
+run_test("code playground multiple", ({override, mock_template}) => {
     override(realm_playground, "get_playground_info_for_languages", (language) => {
         assert.equal(language, "javascript");
         return ["whatever", "whatever"];
     });
 
-    const {prepends, copy_code, view_code} = test_code_playground();
+    const {prepends, copy_code, view_code} = test_code_playground(mock_template, true);
     assert.deepEqual(prepends, [view_code, copy_code]);
     assert_clipboard_setup();
 

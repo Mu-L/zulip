@@ -77,10 +77,9 @@ the UI will be frozen as the time you enabled this setting.
 
 {start_tabs}
 
-{settings_tab|notifications}
+{settings_tab|account-and-privacy}
 
-1. Under **Other notification settings**, in the **Presence**
-   subsection, toggle **Display my availability to other users**.
+1. Under **Privacy**, toggle **Display my availability to other users**.
 
 {end_tabs}
 
@@ -90,4 +89,11 @@ minutes after disabling updates to your availability.
 
 ## Typing notifications
 
-Zulip displays typing notifications in private messages.
+Zulip displays typing notifications when viewing a private message or
+group private message conversation to which one of the other
+participants is currently composing a message.
+
+Typing notifications are only sent while one is actively editing text
+in the compose box, and they disappear if typing is paused for about
+15 seconds.  Just having the compose box open will not send a typing
+notification.

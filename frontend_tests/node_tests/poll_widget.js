@@ -2,17 +2,12 @@
 
 const {strict: assert} = require("assert");
 
-const {mock_cjs, mock_template, zrequire} = require("../zjsunit/namespace");
+const {zrequire} = require("../zjsunit/namespace");
 const {run_test} = require("../zjsunit/test");
 const blueslip = require("../zjsunit/zblueslip");
 const $ = require("../zjsunit/zjquery");
 
 const {PollData} = zrequire("../../static/shared/js/poll_data");
-
-mock_cjs("jquery", $);
-
-const render_poll_widget = mock_template("widgets/poll_widget.hbs");
-const render_poll_widget_results = mock_template("widgets/poll_widget_results.hbs");
 
 const poll_widget = zrequire("poll_widget");
 
@@ -38,6 +33,7 @@ run_test("PollData my question", () => {
 
     const data_holder = new PollData({
         current_user_id: me.user_id,
+        message_sender_id: me.user_id,
         is_my_poll,
         question,
         options: [],
@@ -181,9 +177,38 @@ run_test("PollData my question", () => {
     });
 });
 
-run_test("activate another person poll", (override) => {
-    override(render_poll_widget, "f", () => "widgets/poll_widget");
-    override(render_poll_widget_results, "f", () => "widgets/poll_widget_results");
+run_test("wrong person editing question", () => {
+    const is_my_poll = true;
+    const question = "Favorite color?";
+
+    const data_holder = new PollData({
+        current_user_id: me.user_id,
+        message_sender_id: me.user_id,
+        is_my_poll,
+        question,
+        options: [],
+        comma_separated_names: people.get_full_names_for_poll_option,
+        report_error_function: blueslip.warn,
+    });
+
+    const question_event = {
+        type: "question",
+        question: "best plan?",
+    };
+
+    blueslip.expect("warn", "user 100 is not allowed to edit the question");
+
+    data_holder.handle_event(alice.user_id, question_event);
+
+    assert.deepEqual(data_holder.get_widget_data(), {
+        options: [],
+        question: "Favorite color?",
+    });
+});
+
+run_test("activate another person poll", ({mock_template}) => {
+    mock_template("widgets/poll_widget.hbs", false, () => "widgets/poll_widget");
+    mock_template("widgets/poll_widget_results.hbs", false, () => "widgets/poll_widget_results");
 
     const widget_elem = $("<div>").addClass("widget-content");
 
@@ -296,9 +321,9 @@ run_test("activate another person poll", (override) => {
     widget_elem.handle_events(add_question_event);
 });
 
-run_test("activate own poll", (override) => {
-    override(render_poll_widget, "f", () => "widgets/poll_widget");
-    override(render_poll_widget_results, "f", () => "widgets/poll_widget_results");
+run_test("activate own poll", ({mock_template}) => {
+    mock_template("widgets/poll_widget.hbs", false, () => "widgets/poll_widget");
+    mock_template("widgets/poll_widget_results.hbs", false, () => "widgets/poll_widget_results");
 
     const widget_elem = $("<div>").addClass("widget-content");
     let out_data;

@@ -1,5 +1,5 @@
 <div id="user-profile-modal" class="modal new-style modal-bg fade{{#unless profile_data.length}} no-fields{{/unless}}"
-  tabindex="-1" role="dialog" aria-labelledby="user_profile_modal label" aria-hidden="true">
+  tabindex="-1" role="dialog" aria-labelledby="user_profile_modal label" aria-hidden="true" data-user-id="{{user_id}}">
     <div class="modal-body" id="body" data-simplebar data-simplebar-auto-hide="false">
         <button type="button" class="close" data-dismiss="modal" aria-label="{{t 'Close' }}">
             <span aria-hidden="true" id="exit-sign">&times;</span>
@@ -7,7 +7,7 @@
         <div id="name">
             {{full_name}}
             {{#if is_me}}
-            <a href="/#settings/your-account">
+            <a href="/#settings/profile">
                 <i class="fa fa-edit" id="edit-button" aria-hidden="true"></i>
             </a>
             {{/if}}
@@ -64,13 +64,25 @@
                 </div>
             </div>
 
-            <div class="subscription-group-list">
-                <div class="tabcontent" id="groups-tab">
-                    <table class="user-group-list" data-empty="{{t 'No user group subscriptions.'}}"></table>
+            <div class="tabcontent" id="user-profile-streams-tab">
+                <div class="stream-list-top-section">
+                    <div class="header-section">
+                        <h3 class="stream-list-header">{{t 'Subscribed streams' }}</h3>
+                    </div>
+                    <input type="text" class="stream-search" placeholder="{{t 'Filter streams' }}" />
+                    <button type="button" class="clear_search_button" id="clear_stream_search">
+                        <i class="fa fa-remove" aria-hidden="true"></i>
+                    </button>
                 </div>
-
-                <div class="tabcontent" id="streams-tab">
+                <div class="alert stream_list_info"></div>
+                <div class="subscription-stream-list">
                     <table class="user-stream-list" data-empty="{{t 'No stream subscriptions.'}}"></table>
+                </div>
+            </div>
+
+            <div class="tabcontent" id="user-profile-groups-tab">
+                <div class="subscription-group-list">
+                    <table class="user-group-list" data-empty="{{t 'No user group subscriptions.'}}"></table>
                 </div>
             </div>
 

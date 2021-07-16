@@ -44,9 +44,14 @@ from zerver.lib.actions import (
     internal_prep_private_message,
     internal_prep_stream_message,
 )
-from zerver.lib.exceptions import ErrorCode, JsonableError, OrganizationOwnerRequired
-from zerver.lib.request import REQ, has_request_variables
-from zerver.lib.response import json_error, json_success
+from zerver.lib.exceptions import (
+    ErrorCode,
+    JsonableError,
+    OrganizationOwnerRequired,
+    ResourceNotFoundError,
+)
+from zerver.lib.request import REQ, get_request_notes, has_request_variables
+from zerver.lib.response import json_success
 from zerver.lib.retention import parse_message_retention_days
 from zerver.lib.streams import (
     StreamDict,
@@ -148,7 +153,7 @@ def add_default_stream(
 ) -> HttpResponse:
     (stream, sub) = access_stream_by_id(user_profile, stream_id)
     if stream.invite_only:
-        return json_error(_("Private streams cannot be made default."))
+        raise JsonableError(_("Private streams cannot be made default."))
     do_add_default_stream(stream)
     return json_success()
 
@@ -180,7 +185,7 @@ def update_default_stream_group_info(
     new_description: Optional[str] = REQ(default=None),
 ) -> None:
     if not new_group_name and not new_description:
-        return json_error(_('You must pass "new_description" or "new_group_name".'))
+        raise JsonableError(_('You must pass "new_description" or "new_group_name".'))
 
     group = access_default_stream_group_by_id(user_profile.realm, group_id)
     if new_group_name is not None:
@@ -210,7 +215,7 @@ def update_default_stream_group_streams(
     elif op == "remove":
         do_remove_streams_from_default_stream_group(user_profile.realm, group, streams)
     else:
-        return json_error(_('Invalid value for "op". Specify one of "add" or "remove".'))
+        raise JsonableError(_('Invalid value for "op". Specify one of "add" or "remove".'))
     return json_success()
 
 
@@ -278,7 +283,7 @@ def update_stream_backend(
     if new_name is not None:
         new_name = new_name.strip()
         if stream.name == new_name:
-            return json_error(_("Stream already has that name!"))
+            raise JsonableError(_("Stream already has that name!"))
         if stream.name.lower() != new_name.lower():
             # Check that the stream name is available (unless we are
             # are only changing the casing of the stream name).
@@ -301,7 +306,7 @@ def update_stream_backend(
         default_stream_ids = {s.id for s in get_default_streams_for_realm(stream.realm_id)}
         (stream, sub) = access_stream_by_id(user_profile, stream_id)
         if is_private and stream.id in default_stream_ids:
-            return json_error(_("Default streams cannot be made private."))
+            raise JsonableError(_("Default streams cannot be made private."))
         do_change_stream_invite_only(stream, is_private, history_public_to_subscribers)
     return json_success()
 
@@ -340,7 +345,7 @@ def update_subscriptions_backend(
     add: Sequence[Mapping[str, str]] = REQ(json_validator=add_subscriptions_schema, default=[]),
 ) -> HttpResponse:
     if not add and not delete:
-        return json_error(_('Nothing to do. Specify at least one of "add" or "delete".'))
+        raise JsonableError(_('Nothing to do. Specify at least one of "add" or "delete".'))
 
     thunks = [
         lambda: add_subscriptions_backend(request, user_profile, streams_raw=add),
@@ -356,17 +361,12 @@ def compose_views(thunks: List[Callable[[], HttpResponse]]) -> HttpResponse:
     everything goes right.  (This helps clients avoid extra latency
     hops.)  It rolls back the transaction when things go wrong in any
     one of the composed methods.
-
-    TODO: Move this a utils-like module if we end up using it more widely.
-
     """
 
     json_dict: Dict[str, Any] = {}
     with transaction.atomic():
         for thunk in thunks:
             response = thunk()
-            if response.status_code != 200:
-                raise JsonableError(response.content)
             json_dict.update(orjson.loads(response.content))
     return json_success(json_dict)
 
@@ -404,8 +404,10 @@ def remove_subscriptions_backend(
         people_to_unsub = {user_profile}
 
     result: Dict[str, List[str]] = dict(removed=[], not_removed=[])
+    client = get_request_notes(request).client
+    assert client is not None
     (removed, not_subscribed) = bulk_remove_subscriptions(
-        people_to_unsub, streams, request.client, acting_user=user_profile
+        people_to_unsub, streams, client, acting_user=user_profile
     )
 
     for (subscriber, removed_stream) in removed:
@@ -498,7 +500,7 @@ def add_subscriptions_backend(
         user_profile, existing_streams
     )
     if len(unauthorized_streams) > 0 and authorization_errors_fatal:
-        return json_error(
+        raise JsonableError(
             _("Unable to access stream ({stream_name}).").format(
                 stream_name=unauthorized_streams[0].name,
             )
@@ -508,7 +510,7 @@ def add_subscriptions_backend(
 
     if len(principals) > 0:
         if realm.is_zephyr_mirror_realm and not all(stream.invite_only for stream in streams):
-            return json_error(
+            raise JsonableError(
                 _("You can only invite other Zephyr mirroring users to private streams.")
             )
         if not user_profile.can_subscribe_other_users():
@@ -780,7 +782,7 @@ def json_stream_exists(
     try:
         (stream, sub) = access_stream_by_name(user_profile, stream_name)
     except JsonableError as e:
-        return json_error(e.msg, status=404)
+        raise ResourceNotFoundError(e.msg)
 
     # access_stream functions return a subscription if and only if we
     # are already subscribed.
@@ -865,16 +867,16 @@ def update_subscription_properties_backend(
         value = change["value"]
 
         if property not in property_converters:
-            return json_error(_("Unknown subscription property: {}").format(property))
+            raise JsonableError(_("Unknown subscription property: {}").format(property))
 
         (stream, sub) = access_stream_by_id(user_profile, stream_id)
         if sub is None:
-            return json_error(_("Not subscribed to stream id {}").format(stream_id))
+            raise JsonableError(_("Not subscribed to stream id {}").format(stream_id))
 
         try:
             value = property_converters[property](property, value)
         except ValidationError as error:
-            return json_error(error.message)
+            raise JsonableError(error.message)
 
         do_change_subscription_property(
             user_profile, sub, stream, property, value, acting_user=user_profile

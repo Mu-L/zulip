@@ -10,13 +10,10 @@ from django.core.exceptions import ValidationError
 from django.http import HttpResponse
 from django.utils.timezone import now as timezone_now
 
-from zerver.decorator import JsonableError
 from zerver.lib.actions import (
     bulk_add_subscriptions,
     bulk_get_subscriber_user_ids,
     bulk_remove_subscriptions,
-    can_access_stream_user_ids,
-    create_stream_if_needed,
     do_add_default_stream,
     do_add_streams_to_default_stream_group,
     do_change_default_stream_group_description,
@@ -39,13 +36,13 @@ from zerver.lib.actions import (
     gather_subscriptions_helper,
     get_average_weekly_stream_traffic,
     get_default_streams_for_realm,
-    get_stream,
     lookup_default_stream_groups,
     round_to_2_significant_digits,
     validate_user_access_to_subscribers_helper,
 )
+from zerver.lib.exceptions import JsonableError
 from zerver.lib.message import aggregate_unread_data, get_raw_unread_data
-from zerver.lib.response import json_error, json_success
+from zerver.lib.response import json_success
 from zerver.lib.stream_subscription import (
     get_active_subscriptions_for_stream_id,
     num_subscribers_for_stream_id,
@@ -56,6 +53,8 @@ from zerver.lib.streams import (
     access_stream_by_id,
     access_stream_by_name,
     can_access_stream_history,
+    can_access_stream_user_ids,
+    create_stream_if_needed,
     create_streams_if_needed,
     filter_stream_authorization,
     list_to_streams,
@@ -83,6 +82,7 @@ from zerver.models import (
     get_client,
     get_default_stream_groups,
     get_realm,
+    get_stream,
     get_user,
     get_user_profile_by_id_in_realm,
 )
@@ -1727,150 +1727,6 @@ class StreamAdminTest(ZulipTestCase):
         self.assert_length(json["removed"], 2)
         self.assert_length(json["not_removed"], 0)
 
-    def test_create_stream_policy_setting(self) -> None:
-        """
-        When realm.create_stream_policy setting is Realm.POLICY_MEMBERS_ONLY then
-        test that any user can create a stream.
-
-        When realm.create_stream_policy setting is Realm.POLICY_ADMINS_ONLY then
-        test that only admins can create a stream.
-
-        When realm.create_stream_policy setting is Realm.POLICY_FULL_MEMBERS_ONLY then
-        test that admins and users with accounts older than the waiting period can create a stream.
-        """
-        user_profile = self.example_user("hamlet")
-        user_profile.date_joined = timezone_now()
-        user_profile.save()
-        self.login_user(user_profile)
-        do_change_user_role(user_profile, UserProfile.ROLE_MEMBER, acting_user=None)
-
-        # Allow all members to create streams.
-        do_set_realm_property(
-            user_profile.realm,
-            "create_stream_policy",
-            Realm.POLICY_MEMBERS_ONLY,
-            acting_user=None,
-        )
-        # Set waiting period to 10 days.
-        do_set_realm_property(user_profile.realm, "waiting_period_threshold", 10, acting_user=None)
-
-        # Can successfully create stream despite being less than waiting period and not an admin,
-        # due to create stream policy.
-        stream_name = ["all_members"]
-        result = self.common_subscribe_to_streams(user_profile, stream_name)
-        self.assert_json_success(result)
-
-        # Allow only administrators to create streams.
-        do_set_realm_property(
-            user_profile.realm,
-            "create_stream_policy",
-            Realm.POLICY_ADMINS_ONLY,
-            acting_user=None,
-        )
-
-        # Cannot create stream because not an admin.
-        stream_name = ["admins_only"]
-        result = self.common_subscribe_to_streams(user_profile, stream_name, allow_fail=True)
-        self.assert_json_error(result, "Insufficient permission")
-
-        # Make current user an admin.
-        do_change_user_role(user_profile, UserProfile.ROLE_REALM_ADMINISTRATOR, acting_user=None)
-
-        # Can successfully create stream as user is now an admin.
-        stream_name = ["admins_only"]
-        self.common_subscribe_to_streams(user_profile, stream_name)
-
-        # Allow users older than the waiting period to create streams.
-        do_set_realm_property(
-            user_profile.realm,
-            "create_stream_policy",
-            Realm.POLICY_FULL_MEMBERS_ONLY,
-            acting_user=None,
-        )
-
-        # Can successfully create stream despite being under waiting period because user is admin.
-        stream_name = ["waiting_period_as_admin"]
-        self.common_subscribe_to_streams(user_profile, stream_name)
-
-        # Make current user no longer an admin.
-        do_change_user_role(user_profile, UserProfile.ROLE_MEMBER, acting_user=None)
-
-        # Cannot create stream because user is not an admin and is not older than the waiting
-        # period.
-        stream_name = ["waiting_period"]
-        result = self.common_subscribe_to_streams(user_profile, stream_name, allow_fail=True)
-        self.assert_json_error(result, "Insufficient permission")
-
-        # Make user account 11 days old..
-        user_profile.date_joined = timezone_now() - timedelta(days=11)
-        user_profile.save()
-
-        # Can successfully create stream now that account is old enough.
-        stream_name = ["waiting_period"]
-        self.common_subscribe_to_streams(user_profile, stream_name)
-
-    def test_invite_to_stream_by_invite_period_threshold(self) -> None:
-        """
-        Non admin users with account age greater or equal to the invite
-        to stream threshold should be able to invite others to a stream.
-        """
-        hamlet_user = self.example_user("hamlet")
-        hamlet_user.date_joined = timezone_now()
-        hamlet_user.save()
-
-        cordelia_user = self.example_user("cordelia")
-        cordelia_user.date_joined = timezone_now()
-        cordelia_user.save()
-
-        do_set_realm_property(
-            hamlet_user.realm,
-            "invite_to_stream_policy",
-            Realm.POLICY_FULL_MEMBERS_ONLY,
-            acting_user=None,
-        )
-        cordelia_user_id = cordelia_user.id
-
-        self.login_user(hamlet_user)
-        do_change_user_role(hamlet_user, UserProfile.ROLE_REALM_ADMINISTRATOR, acting_user=None)
-
-        # Hamlet creates a stream as an admin..
-        stream_name = ["waitingperiodtest"]
-        self.common_subscribe_to_streams(hamlet_user, stream_name)
-
-        # Can only invite users to stream if their account is ten days old..
-        do_change_user_role(hamlet_user, UserProfile.ROLE_MEMBER, acting_user=None)
-        do_set_realm_property(hamlet_user.realm, "waiting_period_threshold", 10, acting_user=None)
-
-        # Attempt and fail to invite Cordelia to the stream..
-        result = self.common_subscribe_to_streams(
-            hamlet_user,
-            stream_name,
-            {"principals": orjson.dumps([cordelia_user_id]).decode()},
-            allow_fail=True,
-        )
-        self.assert_json_error(result, "Insufficient permission")
-
-        # Anyone can invite users..
-        do_set_realm_property(hamlet_user.realm, "waiting_period_threshold", 0, acting_user=None)
-
-        # Attempt and succeed to invite Cordelia to the stream..
-        self.common_subscribe_to_streams(
-            hamlet_user, stream_name, {"principals": orjson.dumps([cordelia_user_id]).decode()}
-        )
-
-        # Set threshold to 20 days..
-        do_set_realm_property(hamlet_user.realm, "waiting_period_threshold", 20, acting_user=None)
-        # Make Hamlet's account 21 days old..
-        hamlet_user.date_joined = timezone_now() - timedelta(days=21)
-        hamlet_user.save()
-        # Unsubscribe Cordelia..
-        self.unsubscribe(cordelia_user, stream_name[0])
-
-        # Attempt and succeed to invite Aaron to the stream..
-        self.common_subscribe_to_streams(
-            hamlet_user, stream_name, {"principals": orjson.dumps([cordelia_user_id]).decode()}
-        )
-
     def test_remove_already_not_subbed(self) -> None:
         """
         Trying to unsubscribe someone who already isn't subscribed to a stream
@@ -1941,6 +1797,8 @@ class DefaultStreamTest(ZulipTestCase):
         do_change_user_role(user_profile, UserProfile.ROLE_REALM_ADMINISTRATOR, acting_user=None)
         self.login_user(user_profile)
 
+        DefaultStream.objects.filter(realm=user_profile.realm).delete()
+
         stream_name = "stream ADDED via api"
         stream = ensure_stream(user_profile.realm, stream_name, acting_user=None)
         result = self.client_post("/json/default_streams", dict(stream_id=stream.id))
@@ -1960,7 +1818,7 @@ class DefaultStreamTest(ZulipTestCase):
         self.assertEqual(default_streams, {stream_name})
 
         other_streams = {stream["name"] for stream in streams if not stream["is_default"]}
-        self.assertTrue(len(other_streams) > 0)
+        self.assertGreater(len(other_streams), 0)
 
         # and remove it
         result = self.client_delete("/json/default_streams", dict(stream_id=stream.id))
@@ -2936,7 +2794,7 @@ class SubscriptionRestApiTest(ZulipTestCase):
             return json_success()
 
         def thunk2() -> HttpResponse:
-            return json_error("random failure")
+            raise JsonableError("random failure")
 
         with self.assertRaises(JsonableError):
             compose_views([thunk1, thunk2])
@@ -3235,42 +3093,47 @@ class SubscriptionAPITest(ZulipTestCase):
             result, f"Stream name '{stream_name}' contains NULL (0x00) characters."
         )
 
-    def test_user_settings_for_adding_streams(self) -> None:
+    def _test_user_settings_for_adding_streams(self, stream_policy: str, invite_only: bool) -> None:
         do_set_realm_property(
-            self.test_user.realm, "create_stream_policy", Realm.POLICY_ADMINS_ONLY, acting_user=None
+            self.test_user.realm, stream_policy, Realm.POLICY_ADMINS_ONLY, acting_user=None
         )
+
         with mock.patch("zerver.models.UserProfile.can_create_streams", return_value=False):
-            result = self.common_subscribe_to_streams(self.test_user, ["stream1"], allow_fail=True)
+            result = self.common_subscribe_to_streams(
+                self.test_user, ["stream1"], invite_only=invite_only, allow_fail=True
+            )
             self.assert_json_error(result, "Insufficient permission")
 
         with mock.patch("zerver.models.UserProfile.can_create_streams", return_value=True):
-            self.common_subscribe_to_streams(self.test_user, ["stream2"])
+            self.common_subscribe_to_streams(self.test_user, ["stream2"], invite_only=invite_only)
 
         # User should still be able to subscribe to an existing stream
         with mock.patch("zerver.models.UserProfile.can_create_streams", return_value=False):
-            self.common_subscribe_to_streams(self.test_user, ["stream2"])
+            self.common_subscribe_to_streams(self.test_user, ["stream2"], invite_only=invite_only)
 
-    def test_user_settings_for_creating_streams(self) -> None:
+    def test_user_settings_for_adding_streams(self) -> None:
+        self._test_user_settings_for_adding_streams("create_stream_policy", invite_only=False)
+
+    def _test_user_settings_for_creating_streams(
+        self, stream_policy: str, invite_only: bool
+    ) -> None:
         user_profile = self.example_user("cordelia")
         realm = user_profile.realm
 
-        do_set_realm_property(
-            realm, "create_stream_policy", Realm.POLICY_ADMINS_ONLY, acting_user=None
-        )
+        do_set_realm_property(realm, stream_policy, Realm.POLICY_ADMINS_ONLY, acting_user=None)
         do_change_user_role(user_profile, UserProfile.ROLE_MODERATOR, acting_user=None)
         result = self.common_subscribe_to_streams(
             user_profile,
             ["new_stream1"],
+            invite_only=invite_only,
             allow_fail=True,
         )
         self.assert_json_error(result, "Insufficient permission")
 
         do_change_user_role(user_profile, UserProfile.ROLE_REALM_ADMINISTRATOR, acting_user=None)
-        self.common_subscribe_to_streams(user_profile, ["new_stream1"])
+        self.common_subscribe_to_streams(user_profile, ["new_stream1"], invite_only=invite_only)
 
-        do_set_realm_property(
-            realm, "create_stream_policy", Realm.POLICY_MODERATORS_ONLY, acting_user=None
-        )
+        do_set_realm_property(realm, stream_policy, Realm.POLICY_MODERATORS_ONLY, acting_user=None)
         do_change_user_role(user_profile, UserProfile.ROLE_MEMBER, acting_user=None)
         # Make sure that we are checking the permission with a full member,
         # as full member is the user just below moderator in the role hierarchy.
@@ -3285,13 +3148,12 @@ class SubscriptionAPITest(ZulipTestCase):
         do_change_user_role(user_profile, UserProfile.ROLE_MODERATOR, acting_user=None)
         self.common_subscribe_to_streams(user_profile, ["new_stream2"])
 
-        do_set_realm_property(
-            realm, "create_stream_policy", Realm.POLICY_MEMBERS_ONLY, acting_user=None
-        )
+        do_set_realm_property(realm, stream_policy, Realm.POLICY_MEMBERS_ONLY, acting_user=None)
         do_change_user_role(user_profile, UserProfile.ROLE_GUEST, acting_user=None)
         result = self.common_subscribe_to_streams(
             user_profile,
-            ["new_stream2"],
+            ["new_stream3"],
+            invite_only=invite_only,
             allow_fail=True,
         )
         self.assert_json_error(result, "Not allowed for guest users")
@@ -3299,22 +3161,27 @@ class SubscriptionAPITest(ZulipTestCase):
         do_change_user_role(user_profile, UserProfile.ROLE_MEMBER, acting_user=None)
         self.common_subscribe_to_streams(
             self.test_user,
-            ["new_stream3"],
+            ["new_stream4"],
+            invite_only=invite_only,
         )
 
         do_set_realm_property(
-            realm, "create_stream_policy", Realm.POLICY_FULL_MEMBERS_ONLY, acting_user=None
+            realm, stream_policy, Realm.POLICY_FULL_MEMBERS_ONLY, acting_user=None
         )
         do_set_realm_property(realm, "waiting_period_threshold", 100000, acting_user=None)
         result = self.common_subscribe_to_streams(
             user_profile,
-            ["new_stream4"],
+            ["new_stream5"],
+            invite_only=invite_only,
             allow_fail=True,
         )
         self.assert_json_error(result, "Insufficient permission")
 
         do_set_realm_property(realm, "waiting_period_threshold", 0, acting_user=None)
-        self.common_subscribe_to_streams(user_profile, ["new_stream3"])
+        self.common_subscribe_to_streams(user_profile, ["new_stream3"], invite_only=invite_only)
+
+    def test_user_settings_for_creating_streams(self) -> None:
+        self._test_user_settings_for_creating_streams("create_stream_policy", invite_only=False)
 
     def test_can_create_streams(self) -> None:
         def validation_func(user_profile: UserProfile) -> bool:
@@ -3692,19 +3559,6 @@ class SubscriptionAPITest(ZulipTestCase):
         stream = get_stream("Denmark", guest_user.realm)
         self.assertEqual(filter_stream_authorization(guest_user, [stream]), ([], [stream]))
 
-        # Test UserProfile.can_create_streams for guest users.
-        streams_raw: List[StreamDict] = [
-            {
-                "invite_only": False,
-                "history_public_to_subscribers": None,
-                "name": "new_stream",
-                "stream_post_policy": Stream.STREAM_POST_POLICY_EVERYONE,
-            }
-        ]
-
-        with self.assertRaisesRegex(JsonableError, "Insufficient permission"):
-            list_to_streams(streams_raw, guest_user)
-
         stream = self.make_stream("private_stream", invite_only=True)
         result = self.common_subscribe_to_streams(guest_user, ["private_stream"], allow_fail=True)
         self.assert_json_error(result, "Not allowed for guest users")
@@ -4074,7 +3928,7 @@ class SubscriptionAPITest(ZulipTestCase):
         self.assertGreaterEqual(len(self.streams), 2)
         streams_to_remove = self.streams[1:]
         not_subbed = []
-        for stream in Stream.objects.all():
+        for stream in Stream.objects.filter(realm=get_realm("zulip")):
             if stream.name not in self.streams:
                 not_subbed.append(stream.name)
         random.shuffle(not_subbed)
@@ -4532,7 +4386,7 @@ class GetStreamsTest(ZulipTestCase):
 
         self.assertEqual(
             stream_names,
-            {"Venice", "Denmark", "Scotland", "Verona", "Rome"},
+            {"Venice", "Denmark", "Scotland", "Verona", "Rome", "core team"},
         )
 
     def test_public_streams_api(self) -> None:
@@ -4569,7 +4423,9 @@ class GetStreamsTest(ZulipTestCase):
         self.assert_json_success(result)
 
         json = result.json()
-        all_streams = [stream.name for stream in Stream.objects.filter(realm=realm)]
+        all_streams = [
+            stream.name for stream in Stream.objects.filter(realm=realm, invite_only=False)
+        ]
         self.assertEqual(sorted(s["name"] for s in json["streams"]), sorted(all_streams))
 
 
@@ -4798,11 +4654,11 @@ class GetSubscribersTest(ZulipTestCase):
             subscribed_streams, _ = gather_subscriptions(
                 self.user_profile, include_subscribers=True
             )
-        self.assertTrue(len(subscribed_streams) >= 11)
+        self.assertGreaterEqual(len(subscribed_streams), 11)
         for sub in subscribed_streams:
             if not sub["name"].startswith("stream_"):
                 continue
-            self.assertTrue(len(sub["subscribers"]) == len(users_to_subscribe))
+            self.assert_length(sub["subscribers"], len(users_to_subscribe))
         self.assert_length(queries, 5)
 
     def test_never_subscribed_streams(self) -> None:
@@ -4886,7 +4742,7 @@ class GetSubscribersTest(ZulipTestCase):
         for stream_dict in never_subscribed:
             name = stream_dict["name"]
             self.assertFalse("invite_only" in name)
-            self.assertTrue(len(stream_dict["subscribers"]) == len(users_to_subscribe))
+            self.assert_length(stream_dict["subscribers"], len(users_to_subscribe))
 
         # Send private stream subscribers to all realm admins.
         def test_admin_case() -> None:
@@ -4899,7 +4755,7 @@ class GetSubscribersTest(ZulipTestCase):
                 len(public_streams) + len(private_streams) + len(web_public_streams),
             )
             for stream_dict in never_subscribed:
-                self.assertTrue(len(stream_dict["subscribers"]) == len(users_to_subscribe))
+                self.assert_length(stream_dict["subscribers"], len(users_to_subscribe))
 
         test_admin_case()
 
@@ -5024,14 +4880,14 @@ class GetSubscribersTest(ZulipTestCase):
         with queries_captured() as queries:
             subscribed_streams, _ = gather_subscriptions(mit_user_profile, include_subscribers=True)
 
-        self.assertTrue(len(subscribed_streams) >= 2)
+        self.assertGreaterEqual(len(subscribed_streams), 2)
         for sub in subscribed_streams:
             if not sub["name"].startswith("mit_"):
                 raise AssertionError("Unexpected stream!")
             if sub["name"] == "mit_invite_only":
-                self.assertTrue(len(sub["subscribers"]) == len(users_to_subscribe))
+                self.assert_length(sub["subscribers"], len(users_to_subscribe))
             else:
-                self.assertTrue(len(sub["subscribers"]) == 0)
+                self.assert_length(sub["subscribers"], 0)
         self.assert_length(queries, 5)
 
     def test_nonsubscriber(self) -> None:
@@ -5107,7 +4963,7 @@ class GetSubscribersTest(ZulipTestCase):
         # A guest user can only see never subscribed streams that are web-public.
         # For Polonius, the only web public stream that he is not subscribed at
         # this point is Rome.
-        self.assertTrue(len(never_subscribed) == 1)
+        self.assert_length(never_subscribed, 1)
 
         web_public_stream_id = never_subscribed[0]["stream_id"]
         result = self.client_get(f"/json/streams/{web_public_stream_id}/members")
@@ -5115,7 +4971,7 @@ class GetSubscribersTest(ZulipTestCase):
         result_dict = result.json()
         self.assertIn("subscribers", result_dict)
         self.assertIsInstance(result_dict["subscribers"], list)
-        self.assertTrue(len(result_dict["subscribers"]) > 0)
+        self.assertGreater(len(result_dict["subscribers"]), 0)
 
     def test_nonsubscriber_private_stream(self) -> None:
         """

@@ -412,8 +412,9 @@ def parse_os_release() -> Dict[str, str]:
      'PRETTY_NAME': 'Ubuntu 18.04.3 LTS',
     }
 
-    VERSION_CODENAME (e.g. 'bionic') is nice and human-readable, but
-    we avoid using it, as it is not available on RHEL-based platforms.
+    VERSION_CODENAME (e.g. 'bionic') is nice and readable to Ubuntu
+    developers, but we avoid using it, as it is not available on
+    RHEL-based platforms.
     """
     distro_info = {}  # type: Dict[str, str]
     with open("/etc/os-release") as fp:
@@ -425,11 +426,6 @@ def parse_os_release() -> Dict[str, str]:
                 continue
             k, v = line.split("=", 1)
             [distro_info[k]] = shlex.split(v)
-    if distro_info["PRETTY_NAME"] == "Debian GNU/Linux bullseye/sid":
-        # This hack can be removed once bullseye releases and reports
-        # its VERSION_ID in /etc/os-release.
-        distro_info["VERSION_CODENAME"] = "bullseye"
-        distro_info["VERSION_ID"] = "11"
     return distro_info
 
 
@@ -621,13 +617,34 @@ def is_vagrant_env_host(path: str) -> bool:
     return ".vagrant" in os.listdir(path)
 
 
-def has_application_server() -> bool:
+def has_application_server(once: bool = False) -> bool:
+    if once:
+        return os.path.exists("/etc/supervisor/conf.d/zulip/zulip-once.conf")
     return (
         # Current path
         os.path.exists("/etc/supervisor/conf.d/zulip/zulip.conf")
         # Old path, relevant for upgrades
         or os.path.exists("/etc/supervisor/conf.d/zulip.conf")
     )
+
+
+def list_supervisor_processes(*args: str) -> List[str]:
+    worker_status = subprocess.run(
+        ["supervisorctl", "status", *args],
+        universal_newlines=True,
+        stdout=subprocess.PIPE,
+    )
+    # `supercisorctl status` returns 3 if any are stopped, which is
+    # fine here; and exit code 4 is for no such process, which is
+    # handled below.
+    if worker_status.returncode not in (0, 3, 4):
+        worker_status.check_returncode()
+
+    processes = []
+    for status_line in worker_status.stdout.splitlines():
+        if not re.search(r"ERROR \(no such (process|group)\)", status_line):
+            processes.append(status_line.split()[0])
+    return processes
 
 
 def has_process_fts_updates() -> bool:

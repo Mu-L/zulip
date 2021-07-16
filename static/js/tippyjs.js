@@ -1,12 +1,10 @@
 import $ from "jquery";
 import tippy, {delegate} from "tippy.js";
 
-import render_left_sidebar_stream_setting_popover from "../templates/left_sidebar_stream_setting_popover.hbs";
-
-import * as popovers from "./popovers";
+import * as message_lists from "./message_lists";
 import * as reactions from "./reactions";
 import * as rows from "./rows";
-import * as settings_data from "./settings_data";
+import * as timerender from "./timerender";
 
 // We override the defaults set by tippy library here,
 // so make sure to check this too after checking tippyjs
@@ -20,7 +18,7 @@ tippy.setDefaultProps({
     // Some delay to showing / hiding the tooltip makes
     // it look less forced and more natural.
     delay: [100, 20],
-    placement: "auto",
+    placement: "top",
 
     // disable animations to make the
     // tooltips feel snappy
@@ -40,20 +38,24 @@ tippy.setDefaultProps({
 });
 
 export function initialize() {
+    // Our default tooltip configuration. For this, one simply needs to:
+    // * Set `class="tippy-zulip-tooltip"` on an element for enable this.
+    // * Set `data-tippy-content="{{t 'Tooltip content' }}"`, often
+    //   replacing a `title` attribute on an element that had both.
+    // * Set placement; we typically use `data-tippy-placement="top"`.
     delegate("body", {
-        // Add elements here which are not displayed on
-        // initial load but are displayed later through
-        // some means.
-        //
-        // Make all html elements having this class
-        // show tippy styled tooltip on hover.
         target: ".tippy-zulip-tooltip",
     });
+
+    // The below definitions are for specific tooltips that require
+    // custom JavaScript code or configuration.  Note that since the
+    // below specify the target directly, elements using those should
+    // not have the tippy-zulip-tooltip class.
 
     // message reaction tooltip showing who reacted.
     let observer;
     delegate("body", {
-        target: ".message_reaction, .reaction_button",
+        target: ".message_reaction, .message_reactions .reaction_button",
         placement: "bottom",
         onShow(instance) {
             const elem = $(instance.reference);
@@ -69,6 +71,15 @@ export function initialize() {
             // We target the message table and check for removal of it, it's children
             // and the reactions individually down in the subtree.
             const target_node = elem.parents(".message_table.focused_table").get(0);
+            if (!target_node) {
+                // The `reaction` was removed from DOM before we reached here.
+                // In that case, we simply hide the tooltip.
+                // We have to be smart about hiding the instance, so we hide it as soon
+                // as it is displayed.
+                setTimeout(instance.hide, 0);
+                return;
+            }
+
             const nodes_to_check_for_removal = [
                 elem.parents(".recipient_row").get(0),
                 elem.parents(".message_reactions").get(0),
@@ -91,14 +102,15 @@ export function initialize() {
         },
         onHidden(instance) {
             instance.destroy();
-            observer.disconnect();
+            if (observer) {
+                observer.disconnect();
+            }
         },
         appendTo: () => document.body,
     });
 
     delegate("body", {
         target: ".compose_control_button",
-        placement: "top",
         // Add some additional delay when they open
         // so that regular users don't have to see
         // them unless they want to.
@@ -107,7 +119,9 @@ export function initialize() {
 
     delegate("body", {
         target: ".message_control_button",
-        placement: "top",
+        // This ensures that the tooltip doesn't
+        // hide by the selected message blue border.
+        appendTo: () => document.body,
         // Add some additional delay when they open
         // so that regular users don't have to see
         // them unless they want to.
@@ -140,22 +154,42 @@ export function initialize() {
     });
 
     delegate("body", {
-        delay: 0,
-        target: "#streams_inline_cog",
-        onShow(instance) {
-            popovers.hide_all_except_sidebars();
-            instance.setContent(
-                render_left_sidebar_stream_setting_popover({
-                    can_create_streams: settings_data.user_can_create_streams(),
-                }),
-            );
-            $(instance.popper).on("click", instance.hide);
-        },
+        target: ".message_time",
         appendTo: () => document.body,
-        trigger: "click",
+        onShow(instance) {
+            const time_elem = $(instance.reference);
+            const row = time_elem.closest(".message_row");
+            const message = message_lists.current.get(rows.id(row));
+            const time = new Date(message.timestamp * 1000);
+            instance.setContent(timerender.get_full_datetime(time));
+        },
+        onHidden(instance) {
+            instance.destroy();
+        },
+    });
+
+    delegate("body", {
+        target: ".recipient_row_date > span",
+        appendTo: () => document.body,
+        onHidden(instance) {
+            instance.destroy();
+        },
+    });
+
+    // In case of recipient bar icons, following change
+    // ensures that tooltip doesn't hide behind the message
+    // box or it is not limited by the parent container.
+    delegate("body", {
+        target: [".recipient_bar_icon", ".sidebar-title", "#user_filter_icon"],
+        appendTo: () => document.body,
+    });
+
+    delegate("body", {
+        target: ".rendered_markdown time",
         allowHTML: true,
-        interactive: true,
-        hideOnClick: true,
-        theme: "light-border",
+        appendTo: () => document.body,
+        onHidden(instance) {
+            instance.destroy();
+        },
     });
 }

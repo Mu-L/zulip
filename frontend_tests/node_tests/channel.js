@@ -4,7 +4,7 @@ const {strict: assert} = require("assert");
 
 const _ = require("lodash");
 
-const {mock_cjs, set_global, zrequire} = require("../zjsunit/namespace");
+const {mock_jquery, set_global, zrequire} = require("../zjsunit/namespace");
 const {run_test} = require("../zjsunit/test");
 const blueslip = require("../zjsunit/zblueslip");
 
@@ -18,7 +18,7 @@ const channel = zrequire("channel");
 
 const default_stub_xhr = "default-stub-xhr";
 
-const $ = mock_cjs("jquery", {});
+const $ = mock_jquery({});
 
 function test_with_mock_ajax(test_params) {
     const {xhr = default_stub_xhr, run_code, check_ajax_options} = test_params;
@@ -47,9 +47,9 @@ function test_with_mock_ajax(test_params) {
 }
 
 function test(label, f) {
-    run_test(label, (override) => {
+    run_test(label, ({override}) => {
         reload_state.clear_for_testing();
-        f(override);
+        f({override});
     });
 }
 

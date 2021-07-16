@@ -2,16 +2,13 @@
 
 const {strict: assert} = require("assert");
 
-const {stub_templates} = require("../zjsunit/handlebars");
-const {mock_cjs, mock_esm, zrequire} = require("../zjsunit/namespace");
+const {mock_esm, zrequire} = require("../zjsunit/namespace");
 const {run_test} = require("../zjsunit/test");
 const $ = require("../zjsunit/zjquery");
 const {page_params} = require("../zjsunit/zpage_params");
 
 const noop = () => {};
-stub_templates(() => "<stub>");
 
-mock_cjs("jquery", $);
 const typeahead_helper = mock_esm("../../static/js/typeahead_helper");
 const ui = mock_esm("../../static/js/ui", {
     get_scroll_element: noop,
@@ -29,6 +26,11 @@ mock_esm("../../static/js/list_widget", {
 mock_esm("../../static/js/stream_color", {
     set_colorpicker_color: noop,
 });
+mock_esm("../../static/js/components", {
+    toggle: () => ({
+        get: () => [],
+    }),
+});
 
 const peer_data = zrequire("peer_data");
 const people = zrequire("people");
@@ -38,6 +40,7 @@ const stream_pill = zrequire("stream_pill");
 const user_groups = zrequire("user_groups");
 const user_group_pill = zrequire("user_group_pill");
 const user_pill = zrequire("user_pill");
+const stream_ui_updates = zrequire("stream_ui_updates");
 
 const jill = {
     email: "jill@zulip.com",
@@ -104,14 +107,25 @@ for (const sub of subs) {
 }
 
 function test_ui(label, f) {
-    run_test(label, (override) => {
+    run_test(label, ({override, mock_template}) => {
         page_params.user_id = me.user_id;
         stream_edit.initialize();
-        f(override);
+        f({override, mock_template});
     });
 }
 
-test_ui("subscriber_pills", (override) => {
+test_ui("subscriber_pills", ({override, mock_template}) => {
+    mock_template("input_pill.hbs", true, (data, html) => {
+        assert.equal(typeof data.display_value, "string");
+        return html;
+    });
+    mock_template("subscription_settings.hbs", false, () => "subscription_settings");
+    mock_template(
+        "stream_subscription_request_result.hbs",
+        false,
+        () => "stream_subscription_request_result",
+    );
+
     override(stream_edit, "sort_but_pin_current_user_on_top", noop);
 
     const subscriptions_table_selector = "#subscriptions_table";
@@ -274,6 +288,9 @@ test_ui("subscriber_pills", (override) => {
 
     let fake_this = $subscription_settings;
     let event = {target: fake_this};
+
+    override(stream_ui_updates, "update_toggler_for_sub", noop);
+    override(stream_ui_updates, "update_add_subscriptions_elements", noop);
     stream_row_handler.call(fake_this, event);
     assert.ok(template_rendered);
     assert.ok(input_typeahead_called);
@@ -333,5 +350,14 @@ test_ui("subscriber_pills", (override) => {
     override(user_pill, "get_user_ids", () => [mark.user_id, fred.user_id]);
     stream_pill.get_user_ids = () => peer_data.get_subscribers(denmark.stream_id);
     expected_user_ids = potential_denmark_stream_subscribers.concat(fred.user_id);
+    add_subscribers_handler(event);
+
+    function is_person_active(user_id) {
+        return user_id === mark.user_id;
+    }
+    // Deactivated user_id is not included in request.
+    override(user_pill, "get_user_ids", () => [mark.user_id, fred.user_id]);
+    override(people, "is_person_active", is_person_active);
+    expected_user_ids = [mark.user_id];
     add_subscribers_handler(event);
 });

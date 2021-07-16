@@ -21,7 +21,7 @@ import * as search from "./search";
 import * as settings from "./settings";
 import * as settings_panel_menu from "./settings_panel_menu";
 import * as settings_toggle from "./settings_toggle";
-import * as subs from "./subs";
+import * as stream_settings_ui from "./stream_settings_ui";
 import * as top_left_corner from "./top_left_corner";
 import * as ui_util from "./ui_util";
 
@@ -128,6 +128,7 @@ function do_hashchange_normal(from_reload) {
     // Even if the URL bar says #%41%42%43%44, the value here will
     // be #ABCD.
     const hash = window.location.hash.split("/");
+
     switch (hash[0]) {
         case "#narrow": {
             maybe_hide_recent_topics();
@@ -179,6 +180,8 @@ function do_hashchange_normal(from_reload) {
         case "#about-zulip":
             blueslip.error("overlay logic skipped for: " + hash);
             break;
+        default:
+            show_default_view();
     }
     return false;
 }
@@ -202,7 +205,7 @@ function do_hashchange_overlay(old_hash) {
     // the new overlay.
     if (coming_from_overlay && base === old_base) {
         if (base === "streams") {
-            subs.change_state(section);
+            stream_settings_ui.change_state(section);
             return;
         }
 
@@ -239,8 +242,12 @@ function do_hashchange_overlay(old_hash) {
     const is_hashchange_internal =
         settings_hashes.has(base) && settings_hashes.has(old_base) && overlays.settings_open();
     if (is_hashchange_internal) {
+        if (base === "settings") {
+            settings_panel_menu.normal_settings.activate_section_or_default(section);
+        } else {
+            settings_panel_menu.org_settings.activate_section_or_default(section);
+        }
         settings_toggle.highlight_toggle(base);
-        settings_panel_menu.normal_settings.activate_section_or_default(section);
         return;
     }
 
@@ -259,7 +266,7 @@ function do_hashchange_overlay(old_hash) {
     }
 
     if (base === "streams") {
-        subs.launch(section);
+        stream_settings_ui.launch(section);
         return;
     }
 
@@ -309,6 +316,13 @@ function hashchanged(from_reload, e) {
     const was_internal_change = browser_history.save_old_hash();
 
     if (was_internal_change) {
+        return undefined;
+    }
+
+    // TODO: Migrate the `#reload` syntax to use slashes as separators
+    // so that this can be part of the main switch statement.
+    if (window.location.hash.startsWith("#reload")) {
+        // We don't want to change narrow if app is undergoing reload.
         return undefined;
     }
 

@@ -2,14 +2,13 @@
 
 const {strict: assert} = require("assert");
 
-const {mock_cjs, mock_esm, set_global, zrequire} = require("../zjsunit/namespace");
+const {mock_esm, set_global, zrequire} = require("../zjsunit/namespace");
 const {run_test} = require("../zjsunit/test");
 const $ = require("../zjsunit/zjquery");
 const {page_params} = require("../zjsunit/zpage_params");
 
 const noop = () => {};
 
-mock_cjs("jquery", $);
 const narrow = mock_esm("../../static/js/narrow");
 const narrow_state = mock_esm("../../static/js/narrow_state", {
     filter: () => false,
@@ -33,9 +32,9 @@ const search_pill = zrequire("search_pill");
 const {Filter} = zrequire("../js/filter");
 
 function test(label, f) {
-    run_test(label, (override) => {
+    run_test(label, ({override}) => {
         page_params.search_pills_enabled = true;
-        f(override);
+        f({override});
     });
 }
 

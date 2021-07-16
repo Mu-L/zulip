@@ -10,7 +10,6 @@ from django.http import HttpResponse
 from django.test import override_settings
 from django.utils.timezone import now as timezone_now
 
-from zerver.decorator import JsonableError
 from zerver.lib.actions import (
     build_message_send_dict,
     check_message,
@@ -35,6 +34,7 @@ from zerver.lib.actions import (
 )
 from zerver.lib.addressee import Addressee
 from zerver.lib.cache import cache_delete, get_stream_cache_key
+from zerver.lib.exceptions import JsonableError
 from zerver.lib.message import MessageDict, get_raw_unread_data, get_recent_private_conversations
 from zerver.lib.test_classes import ZulipTestCase
 from zerver.lib.test_helpers import (
@@ -898,6 +898,21 @@ class MessagePOSTTest(ZulipTestCase):
         self.assert_json_success(result)
         sent_message = self.get_last_message()
         self.assertEqual(sent_message.content, "  I like whitespace at the end!")
+
+        # Test if it removes the new line from the beginning of the message.
+        post_data = {
+            "type": "stream",
+            "to": "Verona",
+            "client": "test suite",
+            "content": "\nAvoid the new line at the beginning of the message.",
+            "topic": "Test topic",
+        }
+        result = self.client_post("/json/messages", post_data)
+        self.assert_json_success(result)
+        sent_message = self.get_last_message()
+        self.assertEqual(
+            sent_message.content, "Avoid the new line at the beginning of the message."
+        )
 
     @override_settings(MAX_MESSAGE_LENGTH=25)
     def test_long_message(self) -> None:

@@ -1,9 +1,9 @@
 import $ from "jquery";
 
 import pygments_data from "../generated/pygments_data.json";
+import render_settings_deactivate_realm_modal from "../templates/confirm_dialog/confirm_deactivate_realm.hbs";
 import render_settings_admin_auth_methods_list from "../templates/settings/admin_auth_methods_list.hbs";
 import render_settings_admin_realm_domains_list from "../templates/settings/admin_realm_domains_list.hbs";
-import render_settings_deactivate_realm_modal from "../templates/settings/deactivate_realm_modal.hbs";
 
 import * as blueslip from "./blueslip";
 import * as channel from "./channel";
@@ -95,14 +95,14 @@ export function get_sorted_options_list(option_values_object) {
 export function get_organization_settings_options() {
     const options = {};
     options.common_policy_values = get_sorted_options_list(settings_config.common_policy_values);
-    options.user_group_edit_policy_values = get_sorted_options_list(
-        settings_config.user_group_edit_policy_values,
-    );
     options.private_message_policy_values = get_sorted_options_list(
         settings_config.private_message_policy_values,
     );
     options.wildcard_mention_policy_values = get_sorted_options_list(
         settings_config.wildcard_mention_policy_values,
+    );
+    options.common_message_policy_values = get_sorted_options_list(
+        settings_config.common_message_policy_values,
     );
     return options;
 }
@@ -207,6 +207,7 @@ const simple_dropdown_properties = [
     "realm_invite_to_realm_policy",
     "realm_wildcard_mention_policy",
     "realm_move_messages_between_streams_policy",
+    "realm_edit_topic_policy",
 ];
 
 function set_property_dropdown_value(property_name) {
@@ -248,11 +249,7 @@ function set_msg_edit_limit_dropdown() {
         "id_realm_message_content_edit_limit_minutes",
         value === "custom_limit",
     );
-    settings_ui.disable_sub_setting_onchange(
-        value !== "never",
-        "id_realm_allow_community_topic_editing",
-        true,
-    );
+    settings_ui.disable_sub_setting_onchange(value !== "never", "id_realm_edit_topic_policy", true);
 }
 
 function set_msg_delete_limit_dropdown() {
@@ -774,22 +771,30 @@ export function build_page() {
                         ).seconds;
                 }
                 const delete_limit_setting_value = $("#id_realm_msg_delete_limit_setting").val();
-                if (delete_limit_setting_value === "never") {
-                    data.allow_message_deleting = false;
-                } else if (delete_limit_setting_value === "custom_limit") {
-                    data.message_content_delete_limit_seconds = parse_time_limit(
-                        $("#id_realm_message_content_delete_limit_minutes"),
-                    );
-                    // Disable deleting if the parsed time limit is 0 seconds
-                    data.allow_message_deleting = Boolean(
-                        data.message_content_delete_limit_seconds,
-                    );
-                } else {
-                    data.allow_message_deleting = true;
-                    data.message_content_delete_limit_seconds =
-                        settings_config.msg_delete_limit_dropdown_values.get(
-                            delete_limit_setting_value,
-                        ).seconds;
+                switch (delete_limit_setting_value) {
+                    case "never": {
+                        data.allow_message_deleting = false;
+
+                        break;
+                    }
+                    case "custom_limit": {
+                        data.message_content_delete_limit_seconds = parse_time_limit(
+                            $("#id_realm_message_content_delete_limit_minutes"),
+                        );
+                        // Disable deleting if the parsed time limit is 0 seconds
+                        data.allow_message_deleting = Boolean(
+                            data.message_content_delete_limit_seconds,
+                        );
+
+                        break;
+                    }
+                    default: {
+                        data.allow_message_deleting = true;
+                        data.message_content_delete_limit_seconds =
+                            settings_config.msg_delete_limit_dropdown_values.get(
+                                delete_limit_setting_value,
+                            ).seconds;
+                    }
                 }
                 break;
             }
@@ -1166,7 +1171,6 @@ export function build_page() {
             html_heading: $t_html({defaultMessage: "Deactivate organization"}),
             help_link: "/help/deactivate-your-organization",
             html_body,
-            html_yes_button: $t_html({defaultMessage: "Confirm"}),
             on_click: do_deactivate_realm,
             fade: true,
         });

@@ -8,14 +8,15 @@ from django.http import HttpRequest
 from django.utils import translation
 from two_factor.utils import default_device
 
+from version import ZULIP_MERGE_BASE
+from zerver.context_processors import get_apps_page_url
 from zerver.lib.events import do_events_register
 from zerver.lib.i18n import (
     get_and_set_request_language,
     get_language_list,
-    get_language_list_for_templates,
-    get_language_name,
     get_language_translation_data,
 )
+from zerver.lib.request import get_request_notes
 from zerver.models import Message, Realm, Stream, UserProfile
 from zerver.views.message_flags import get_latest_update_message_flag_activity
 
@@ -71,7 +72,7 @@ def promote_sponsoring_zulip_in_realm(realm: Realm) -> bool:
     return realm.plan_type in [Realm.STANDARD_FREE, Realm.SELF_HOSTED]
 
 
-def get_billing_info(user_profile: UserProfile) -> BillingInfo:
+def get_billing_info(user_profile: Optional[UserProfile]) -> BillingInfo:
     show_billing = False
     show_plans = False
     if settings.CORPORATE_ENABLED and user_profile is not None:
@@ -138,9 +139,11 @@ def build_page_params_for_home_page_load(
     }
 
     if user_profile is not None:
+        client = get_request_notes(request).client
+        assert client is not None
         register_ret = do_events_register(
             user_profile,
-            request.client,
+            client,
             apply_markdown=True,
             client_gravatar=True,
             slim_presence=True,
@@ -149,9 +152,9 @@ def build_page_params_for_home_page_load(
             include_streams=False,
         )
     else:
-        # Since events for web_public_visitor is not implemented, we only fetch the data
+        # Since events for spectator is not implemented, we only fetch the data
         # at the time of request and don't register for any events.
-        # TODO: Implement events for web_public_visitor.
+        # TODO: Implement events for spectator.
         from zerver.lib.events import fetch_initial_state_data, post_process_state
 
         register_ret = fetch_initial_state_data(
@@ -177,6 +180,8 @@ def build_page_params_for_home_page_load(
     )
 
     two_fa_enabled = settings.TWO_FACTOR_AUTHENTICATION_ENABLED and user_profile is not None
+    billing_info = get_billing_info(user_profile)
+    user_permission_info = get_user_permission_info(user_profile)
 
     # Pass parameters to the client-side JavaScript code.
     # These end up in a JavaScript Object named 'page_params'.
@@ -185,14 +190,11 @@ def build_page_params_for_home_page_load(
         test_suite=settings.TEST_SUITE,
         insecure_desktop_app=insecure_desktop_app,
         login_page=settings.HOME_NOT_LOGGED_IN,
-        save_stacktraces=settings.SAVE_FRONTEND_STACKTRACES,
         warn_no_email=settings.WARN_NO_EMAIL,
         search_pills_enabled=settings.SEARCH_PILLS_ENABLED,
         # Only show marketing email settings if on Zulip Cloud
-        enable_marketing_emails_enabled=settings.CORPORATE_ENABLED,
+        corporate_enabled=settings.CORPORATE_ENABLED,
         ## Misc. extra data.
-        default_language_name=get_language_name(register_ret["default_language"]),
-        language_list_dbl_col=get_language_list_for_templates(register_ret["default_language"]),
         language_list=get_language_list(),
         needs_tutorial=needs_tutorial,
         first_in_realm=first_in_realm,
@@ -200,13 +202,20 @@ def build_page_params_for_home_page_load(
         furthest_read_time=furthest_read_time,
         bot_types=get_bot_types(user_profile),
         two_fa_enabled=two_fa_enabled,
+        apps_page_url=get_apps_page_url(),
+        show_billing=billing_info.show_billing,
+        promote_sponsoring_zulip=promote_sponsoring_zulip_in_realm(realm),
+        show_plans=billing_info.show_plans,
+        show_webathena=user_permission_info.show_webathena,
         # Adding two_fa_enabled as condition saves us 3 queries when
         # 2FA is not enabled.
         two_fa_enabled_user=two_fa_enabled and bool(default_device(user_profile)),
-        is_web_public_visitor=user_profile is None,
-        # There is no event queue for web_public_visitors since
-        # events support for web_public_visitors is not implemented yet.
+        is_spectator=user_profile is None,
+        # There is no event queue for spectators since
+        # events support for spectators is not implemented yet.
         no_event_queue=user_profile is None,
+        # Required for about_zulip.hbs
+        zulip_merge_base=ZULIP_MERGE_BASE,
     )
 
     for field_name in register_ret.keys():

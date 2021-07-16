@@ -1,55 +1,78 @@
+<div class="stream_settings_header" data-stream-id="{{sub.stream_id}}">
+    <div class="tab-container"></div>
+    {{#with sub}}
+    <div class="button-group">
+        <div class="sub_unsub_button_wrapper inline-block">
+            <button class="button small rounded subscribe-button sub_unsub_button {{#unless subscribed }}unsubscribed{{/unless}}" type="button" name="button" {{#if should_display_subscription_button}}title="{{t 'Toggle subscription'}} (S)" {{else}}disabled="disabled"{{/if}}>
+                {{#if subscribed }}{{#tr}}Unsubscribe{{/tr}}{{else}}{{#tr}}Subscribe{{/tr}}{{/if}}</button>
+        </div>
+        <a href="{{preview_url}}" class="button small rounded" id="preview-stream-button" role="button" title="{{t 'View stream'}} (V)" {{#unless should_display_preview_button }}style="display: none"{{/unless}}><i class="fa fa-eye"></i></a>
+        {{#if is_realm_admin}}
+        <button class="button small rounded btn-danger deactivate" type="button" name="delete_button" title="{{t 'Archive stream'}}"> <i class="fa fa-trash-o" aria-hidden="true"></i></button>
+        {{/if}}
+    </div>
+    {{/with}}
+</div>
 <div class="subscription_settings" data-stream-id="{{sub.stream_id}}">
     <div class="inner-box">
-        <div class="alert stream_change_property_info"></div>
 
-        {{#with sub}}
-        <div class="stream-header">
-            {{> subscription_privacy
-              invite_only=invite_only
-              is_web_public=is_web_public }}
-            <div class="stream-name">
-                <span title="{{name}}" class="stream-name-editable editable-section" >{{name}}</span>
-                {{#if can_change_name_description}}
-                <span class="editable" data-make-editable=".stream-name-editable"></span>
-                <span class="checkmark" data-finish-editing=".stream-name-editable">✓</span>
-                {{/if}}
-            </div>
-            <div class="button-group">
-                {{#if is_realm_admin}}
-                <button class="button small rounded btn-danger deactivate" type="button" name="delete_button" title="{{t 'Archive stream'}}"> <i class="fa fa-trash-o" aria-hidden="true"></i></button>
-                {{/if}}
-                <div class="sub_unsub_button_wrapper inline-block">
-                    <button class="button small rounded subscribe-button sub_unsub_button {{#unless subscribed }}unsubscribed{{/unless}}" type="button" name="button" {{#if should_display_subscription_button}}title="{{t 'Toggle subscription'}} (S)" {{else}}disabled="disabled"{{/if}}>
-                        {{#if subscribed }}{{t "Unsubscribe"}}{{else}}{{t "Subscribe"}}{{/if}}</button>
+        <div class="general_settings stream_section">
+            {{#with sub}}
+            <div class="stream-header">
+                {{> subscription_privacy
+                  invite_only=invite_only
+                  is_web_public=is_web_public }}
+                <div class="stream-name">
+                    <span class="sub-stream-name" title="{{name}}">{{name}}</span>
                 </div>
-                <a href="{{preview_url}}" class="button small rounded" id="preview-stream-button" role="button" title="{{t 'View stream'}} (V)" {{#unless should_display_preview_button }}style="display: none"{{/unless}}>
-                    <i class="fa fa-eye"></i>
-                </a>
+                <div class="stream_change_property_info alert-notification"></div>
+                <div class="button-group">
+                    <button id="open_stream_info_modal" class="button rounded small btn-warning" title="{{t 'Change stream info' }}">
+                        <i class="fa fa-pencil" aria-hidden="true"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="stream-description">
+                {{> stream_description
+                  rendered_description=rendered_description
+                  }}
+            </div>
+            <div class="stream_setting_subsection_header">
+                <h3 class="stream_setting_subsection_title">
+                    {{t "Stream permissions" }}
+                </h3>
+                {{#if can_change_stream_permissions}}
+                <div class="stream_permission_change_info alert-notification"></div>
+                <div class="button-group">
+                    <a class="change-stream-privacy button rounded small btn-warning" role="button">
+                        <i class="fa fa-pencil" aria-hidden="true"></i>
+                    </a>
+                </div>
+                {{/if}}
+            </div>
+            <div class="subscription-type">
+                <div class="subscription-type-text">
+                    {{> subscription_type
+                      stream_post_policy_values=../stream_post_policy_values
+                      message_retention_text=../message_retention_text}}
+                </div>
+            </div>
+            {{/with}}
+            <div class="stream-email-box" {{#unless sub.email_address}}style="display: none;"{{/unless}}>
+                <h3 class="stream_setting_subsection_title">
+                    {{t "Email address" }}
+                    {{> help_link_widget link="/help/message-a-stream-by-email" }}
+                </h3>
+                <div class="stream-email">
+                    <span class="email-address">{{sub.email_address}}</span>
+                </div>
             </div>
         </div>
-        <div class="stream-description">
-            <span class="stream-description-editable editable-section description rendered_markdown" data-no-description="{{t 'No description.' }}">{{rendered_markdown rendered_description}}</span>
-            {{#if can_change_name_description}}
-            <span class="editable" data-make-editable=".stream-description-editable"></span>
-            <span class="checkmark" data-finish-editing=".stream-description-editable">✓</span>
-            {{/if}}
-        </div>
-        <div class="subscription-type">
-            <div class="subscription-type-text">
-                {{> subscription_type
-                  stream_post_policy_values=../stream_post_policy_values
-                  message_retention_text=../message_retention_text}}
-            </div>
-            <a class="change-stream-privacy" {{#unless can_change_stream_permissions}}style="display: none;"{{/unless}}>[{{t "Change" }}]</a>
-        </div>
-        {{/with}}
 
-        <div class="regular_subscription_settings collapse {{#sub.subscribed}}in{{/sub.subscribed}}">
-            <div id="personal_settings_label_container">
-                <label class="sub_settings_title inline-block">
-                    {{t "Personal settings" }}
-                </label>
-                <div id="stream_change_property_status{{sub.stream_id}}" class="alert-notification"></div>
+        <div id="personal-stream-settings" class="personal_settings stream_section collapse {{#sub.subscribed}}in{{/sub.subscribed}}">
+            <div class="subsection-header">
+                <h3 class="stream_setting_subsection_title inline-block">{{t "Personal settings" }}</h3>
+                <div id="stream_change_property_status{{sub.stream_id}}" class="stream_change_property_status alert-notification"></div>
             </div>
             <div class="subscription-config">
                 <ul class="grey-box">
@@ -75,19 +98,13 @@
                 </ul>
             </div>
         </div>
-        <div class="stream-email-box" {{#unless sub.email_address}}style="display: none;"{{/unless}}>
-            <label class="sub_settings_title">
-                {{t "Email address" }}
-                {{> help_link_widget link="/help/message-a-stream-by-email" }}
-            </label>
-            <div class="stream-email">
-                <span class="email-address">{{sub.email_address}}</span>
+
+        <div class="subscriber_settings stream_section">
+            {{#with sub}}
+            <div class="subscription-members-setting">
+                {{> subscription_members}}
             </div>
+            {{/with}}
         </div>
-        {{#with sub}}
-        <div class="subscription-members-setting">
-            {{> subscription_members}}
-        </div>
-        {{/with}}
     </div>
 </div>

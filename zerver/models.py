@@ -11,6 +11,7 @@ from typing import (
     Dict,
     List,
     Optional,
+    Pattern,
     Sequence,
     Set,
     Tuple,
@@ -254,6 +255,7 @@ class Realm(models.Model):
     POLICY_ADMINS_ONLY = 2
     POLICY_FULL_MEMBERS_ONLY = 3
     POLICY_MODERATORS_ONLY = 4
+    POLICY_EVERYONE = 5
 
     COMMON_POLICY_TYPES = [
         POLICY_MEMBERS_ONLY,
@@ -262,8 +264,21 @@ class Realm(models.Model):
         POLICY_MODERATORS_ONLY,
     ]
 
+    COMMON_MESSAGE_POLICY_TYPES = [
+        POLICY_MEMBERS_ONLY,
+        POLICY_ADMINS_ONLY,
+        POLICY_FULL_MEMBERS_ONLY,
+        POLICY_MODERATORS_ONLY,
+        POLICY_EVERYONE,
+    ]
+
+    DEFAULT_COMMUNITY_TOPIC_EDITING_LIMIT_SECONDS = 259200
+
     # Who in the organization is allowed to create streams.
     create_stream_policy: int = models.PositiveSmallIntegerField(default=POLICY_MEMBERS_ONLY)
+
+    # Who in the organization is allowed to edit topics of any message.
+    edit_topic_policy: int = models.PositiveSmallIntegerField(default=POLICY_EVERYONE)
 
     # Who in the organization is allowed to invite other users to organization.
     invite_to_realm_policy: int = models.PositiveSmallIntegerField(default=POLICY_MEMBERS_ONLY)
@@ -276,15 +291,7 @@ class Realm(models.Model):
         default=POLICY_ADMINS_ONLY
     )
 
-    USER_GROUP_EDIT_POLICY_MEMBERS = 1
-    USER_GROUP_EDIT_POLICY_ADMINS = 2
-    user_group_edit_policy: int = models.PositiveSmallIntegerField(
-        default=USER_GROUP_EDIT_POLICY_MEMBERS
-    )
-    USER_GROUP_EDIT_POLICY_TYPES = [
-        USER_GROUP_EDIT_POLICY_MEMBERS,
-        USER_GROUP_EDIT_POLICY_ADMINS,
-    ]
+    user_group_edit_policy: int = models.PositiveSmallIntegerField(default=POLICY_MEMBERS_ONLY)
 
     PRIVATE_MESSAGE_POLICY_UNLIMITED = 1
     PRIVATE_MESSAGE_POLICY_DISABLED = 2
@@ -362,9 +369,6 @@ class Realm(models.Model):
     # Whether users have access to message edit history
     allow_edit_history: bool = models.BooleanField(default=True)
 
-    DEFAULT_COMMUNITY_TOPIC_EDITING_LIMIT_SECONDS = 259200
-    allow_community_topic_editing: bool = models.BooleanField(default=True)
-
     # Defaults for new users
     default_twenty_four_hour_time: bool = models.BooleanField(default=False)
     default_language: str = models.CharField(default="en", max_length=MAX_LANGUAGE_ID_LENGTH)
@@ -400,10 +404,89 @@ class Realm(models.Model):
     # Messages older than this message ID in the organization are inaccessible.
     first_visible_message_id: int = models.IntegerField(default=0)
 
-    # Valid org_types are {CORPORATE, COMMUNITY}
-    CORPORATE = 1
-    COMMUNITY = 2
-    org_type: int = models.PositiveSmallIntegerField(default=CORPORATE)
+    # Valid org types
+    ORG_TYPES: Dict[str, Dict[str, Any]] = {
+        "unspecified": {
+            "name": "Unspecified",
+            "id": 0,
+            "hidden": True,
+            "hidden_for_sponsorship": True,
+            "display_order": 0,
+        },
+        "business": {
+            "name": "Business",
+            "id": 10,
+            "hidden": False,
+            "hidden_for_sponsorship": True,
+            "display_order": 1,
+        },
+        "opensource": {
+            "name": "Open-source project",
+            "id": 20,
+            "hidden": False,
+            "display_order": 2,
+        },
+        "education": {
+            "name": "Education",
+            "id": 30,
+            "hidden": False,
+            "display_order": 3,
+        },
+        "research": {
+            "name": "Research",
+            "id": 40,
+            "hidden": False,
+            "display_order": 4,
+        },
+        "event": {
+            "name": "Event or conference",
+            "id": 50,
+            "hidden": False,
+            "display_order": 5,
+        },
+        "nonprofit": {
+            "name": "Non-profit (registered)",
+            "id": 60,
+            "hidden": False,
+            "display_order": 6,
+        },
+        "government": {
+            "name": "Government",
+            "id": 70,
+            "hidden": False,
+            "hidden_for_sponsorship": True,
+            "display_order": 7,
+        },
+        "political_group": {
+            "name": "Political group",
+            "id": 80,
+            "hidden": False,
+            "display_order": 8,
+        },
+        "community": {
+            "name": "Community",
+            "id": 90,
+            "hidden": False,
+            "display_order": 9,
+        },
+        "personal": {
+            "name": "Personal",
+            "id": 100,
+            "hidden": False,
+            "display_order": 100,
+        },
+        "other": {
+            "name": "Other",
+            "id": 1000,
+            "hidden": False,
+            "display_order": 1000,
+        },
+    }
+
+    org_type: int = models.PositiveSmallIntegerField(
+        default=ORG_TYPES["unspecified"]["id"],
+        choices=[(t["id"], t["name"]) for t in ORG_TYPES.values()],
+    )
 
     UPGRADE_TEXT_STANDARD = gettext_lazy("Available on Zulip Standard. Upgrade to access.")
     # plan_type controls various features around resource/feature
@@ -443,7 +526,7 @@ class Realm(models.Model):
         },
         # ID 2 was used for the now-deleted Google Hangouts.
         # ID 3 reserved for optional Zoom, see below.
-        # ID 4 reserved for optional Big Blue Button, see below.
+        # ID 4 reserved for optional BigBlueButton, see below.
     }
 
     if settings.VIDEO_ZOOM_CLIENT_ID is not None and settings.VIDEO_ZOOM_CLIENT_SECRET is not None:
@@ -453,7 +536,7 @@ class Realm(models.Model):
         }
 
     if settings.BIG_BLUE_BUTTON_SECRET is not None and settings.BIG_BLUE_BUTTON_URL is not None:
-        VIDEO_CHAT_PROVIDERS["big_blue_button"] = {"name": "Big Blue Button", "id": 4}
+        VIDEO_CHAT_PROVIDERS["big_blue_button"] = {"name": "BigBlueButton", "id": 4}
 
     video_chat_provider: int = models.PositiveSmallIntegerField(
         default=VIDEO_CHAT_PROVIDERS["jitsi_meet"]["id"]
@@ -636,7 +719,7 @@ class Realm(models.Model):
             role__in=roles,
         )
 
-    def get_human_billing_admin_users(self) -> Sequence["UserProfile"]:
+    def get_human_billing_admin_and_realm_owner_users(self) -> QuerySet:
         return UserProfile.objects.filter(
             Q(role=UserProfile.ROLE_REALM_OWNER) | Q(is_billing_admin=True),
             realm=self,
@@ -750,10 +833,10 @@ class Realm(models.Model):
         return self.is_zephyr_mirror_realm
 
 
-def realm_post_delete_handler(sender: Any, **kwargs: Any) -> None:
+def realm_post_delete_handler(*, instance: Realm, **kwargs: object) -> None:
     # This would be better as a functools.partial, but for some reason
     # Django doesn't call it even when it's registered as a post_delete handler.
-    flush_realm(sender, from_deletion=True, **kwargs)
+    flush_realm(instance=instance, from_deletion=True)
 
 
 post_save.connect(flush_realm, sender=Realm)
@@ -776,6 +859,14 @@ def name_changes_disabled(realm: Optional[Realm]) -> bool:
 
 def avatar_changes_disabled(realm: Realm) -> bool:
     return settings.AVATAR_CHANGES_DISABLED or realm.avatar_changes_disabled
+
+
+def get_org_type_display_name(org_type: int) -> str:
+    for realm_type, realm_type_details in Realm.ORG_TYPES.items():
+        if realm_type_details["id"] == org_type:
+            return realm_type_details["name"]
+
+    return ""
 
 
 class RealmDomain(models.Model):
@@ -891,8 +982,8 @@ def get_active_realm_emoji_uncached(realm: Realm) -> Dict[str, Dict[str, Any]]:
     return d
 
 
-def flush_realm_emoji(sender: Any, **kwargs: Any) -> None:
-    realm = kwargs["instance"].realm
+def flush_realm_emoji(*, instance: RealmEmoji, **kwargs: object) -> None:
+    realm = instance.realm
     cache_set(
         get_realm_emoji_cache_key(realm), get_realm_emoji_uncached(realm), timeout=3600 * 24 * 7
     )
@@ -907,7 +998,7 @@ post_save.connect(flush_realm_emoji, sender=RealmEmoji)
 post_delete.connect(flush_realm_emoji, sender=RealmEmoji)
 
 
-def filter_pattern_validator(value: str) -> None:
+def filter_pattern_validator(value: str) -> Pattern[str]:
     regex = re.compile(r"^(?:(?:[\w\-#_= /:]*|[+]|[!])(\(\?P<\w+>.+\)))+$")
     error_msg = _("Invalid linkifier pattern.  Valid characters are {}.").format(
         "[ a-zA-Z_#=/:+!-]",
@@ -917,10 +1008,12 @@ def filter_pattern_validator(value: str) -> None:
         raise ValidationError(error_msg)
 
     try:
-        re.compile(value)
+        pattern = re.compile(value)
     except re.error:
         # Regex is invalid
         raise ValidationError(error_msg)
+
+    return pattern
 
 
 def filter_format_validator(value: str) -> None:
@@ -937,11 +1030,53 @@ class RealmFilter(models.Model):
 
     id: int = models.AutoField(auto_created=True, primary_key=True, verbose_name="ID")
     realm: Realm = models.ForeignKey(Realm, on_delete=CASCADE)
-    pattern: str = models.TextField(validators=[filter_pattern_validator])
+    pattern: str = models.TextField()
     url_format_string: str = models.TextField(validators=[URLValidator(), filter_format_validator])
 
     class Meta:
         unique_together = ("realm", "pattern")
+
+    def clean(self) -> None:
+        """Validate whether the set of parameters in the URL Format string
+        match the set of parameters in the regular expression.
+
+        Django's `full_clean` calls `clean_fields` followed by `clean` method
+        and stores all ValidationErrors from all stages to return as JSON.
+        """
+
+        # Extract variables present in the pattern
+        pattern = filter_pattern_validator(self.pattern)
+        group_set = set(pattern.groupindex.keys())
+
+        # Extract variables used in the URL format string.  Note that
+        # this regex will incorrectly reject patterns that attempt to
+        # escape % using %%.
+        found_group_set: Set[str] = set()
+        group_match_regex = r"(?<!%)%\((?P<group_name>[^()]+)\)s"
+        for m in re.finditer(group_match_regex, self.url_format_string):
+            group_name = m.group("group_name")
+            found_group_set.add(group_name)
+
+        # Report patterns missing in linkifier pattern.
+        missing_in_pattern_set = found_group_set - group_set
+        if len(missing_in_pattern_set) > 0:
+            name = list(sorted(missing_in_pattern_set))[0]
+            raise ValidationError(
+                _("Group %(name)r in URL format string is not present in linkifier pattern."),
+                params={"name": name},
+            )
+
+        missing_in_url_set = group_set - found_group_set
+        # Report patterns missing in URL format string.
+        if len(missing_in_url_set) > 0:
+            # We just report the first missing pattern here. Users can
+            # incrementally resolve errors if there are multiple
+            # missing patterns.
+            name = list(sorted(missing_in_url_set))[0]
+            raise ValidationError(
+                _("Group %(name)r in linkifier pattern is not present in URL format string."),
+                params={"name": name},
+            )
 
     def __str__(self) -> str:
         return f"<RealmFilter({self.realm.string_id}): {self.pattern} {self.url_format_string}>"
@@ -979,9 +1114,9 @@ def realm_filters_for_realm(realm_id: int) -> List[Tuple[str, str, int]]:
 
 @cache_with_key(get_linkifiers_cache_key, timeout=3600 * 24 * 7)
 def linkifiers_for_realm_remote_cache(realm_id: int) -> List[LinkifierDict]:
-    filters = []
+    linkifiers = []
     for linkifier in RealmFilter.objects.filter(realm_id=realm_id):
-        filters.append(
+        linkifiers.append(
             LinkifierDict(
                 pattern=linkifier.pattern,
                 url_format=linkifier.url_format_string,
@@ -989,11 +1124,11 @@ def linkifiers_for_realm_remote_cache(realm_id: int) -> List[LinkifierDict]:
             )
         )
 
-    return filters
+    return linkifiers
 
 
-def flush_linkifiers(sender: Any, **kwargs: Any) -> None:
-    realm_id = kwargs["instance"].realm_id
+def flush_linkifiers(*, instance: RealmFilter, **kwargs: object) -> None:
+    realm_id = instance.realm_id
     cache_delete(get_linkifiers_cache_key(realm_id))
     try:
         per_request_linkifiers_cache.pop(realm_id)
@@ -1091,7 +1226,157 @@ class Recipient(models.Model):
         return f"<Recipient: {display_recipient} ({self.type_id}, {self.type})>"
 
 
-class UserProfile(AbstractBaseUser, PermissionsMixin):
+class UserBaseSettings(models.Model):
+    """This abstract class is the container for all preferences/personal
+    settings for users that control the behavior of the application.
+
+    It was extracted from UserProfile to support the RealmUserDefault
+    model (i.e. allow individual realms to configure the default
+    values of these preferences for new users in their organization).
+
+    Changing the default value for a field declared here likely
+    requires a migration to update all RealmUserDefault rows that had
+    the old default value to have the new default value. Otherwise,
+    the default change will only affect new users joining Realms
+    created after the change.
+    """
+
+    # UI settings
+    enter_sends: Optional[bool] = models.BooleanField(null=True, default=False)
+
+    # display settings
+    left_side_userlist: bool = models.BooleanField(default=False)
+    default_language: str = models.CharField(default="en", max_length=MAX_LANGUAGE_ID_LENGTH)
+    # This setting controls which view is rendered first when Zulip loads.
+    # Values for it are URL suffix after `#`.
+    default_view: str = models.TextField(default="recent_topics")
+    dense_mode: bool = models.BooleanField(default=True)
+    fluid_layout_width: bool = models.BooleanField(default=False)
+    high_contrast_mode: bool = models.BooleanField(default=False)
+    translate_emoticons: bool = models.BooleanField(default=False)
+    twenty_four_hour_time: bool = models.BooleanField(default=False)
+    starred_message_counts: bool = models.BooleanField(default=True)
+    COLOR_SCHEME_AUTOMATIC = 1
+    COLOR_SCHEME_NIGHT = 2
+    COLOR_SCHEME_LIGHT = 3
+    COLOR_SCHEME_CHOICES = [COLOR_SCHEME_AUTOMATIC, COLOR_SCHEME_NIGHT, COLOR_SCHEME_LIGHT]
+    color_scheme: int = models.PositiveSmallIntegerField(default=COLOR_SCHEME_AUTOMATIC)
+
+    # UI setting controlling Zulip's behavior of demoting in the sort
+    # order and graying out streams with no recent traffic.  The
+    # default behavior, automatic, enables this behavior once a user
+    # is subscribed to 30+ streams in the web app.
+    DEMOTE_STREAMS_AUTOMATIC = 1
+    DEMOTE_STREAMS_ALWAYS = 2
+    DEMOTE_STREAMS_NEVER = 3
+    DEMOTE_STREAMS_CHOICES = [
+        DEMOTE_STREAMS_AUTOMATIC,
+        DEMOTE_STREAMS_ALWAYS,
+        DEMOTE_STREAMS_NEVER,
+    ]
+    demote_inactive_streams: int = models.PositiveSmallIntegerField(
+        default=DEMOTE_STREAMS_AUTOMATIC
+    )
+
+    # Emojisets
+    GOOGLE_EMOJISET = "google"
+    GOOGLE_BLOB_EMOJISET = "google-blob"
+    TEXT_EMOJISET = "text"
+    TWITTER_EMOJISET = "twitter"
+    EMOJISET_CHOICES = (
+        (GOOGLE_EMOJISET, "Google modern"),
+        (GOOGLE_BLOB_EMOJISET, "Google classic"),
+        (TWITTER_EMOJISET, "Twitter"),
+        (TEXT_EMOJISET, "Plain text"),
+    )
+    emojiset: str = models.CharField(
+        default=GOOGLE_BLOB_EMOJISET, choices=EMOJISET_CHOICES, max_length=20
+    )
+
+    ### Notifications settings. ###
+
+    # Stream notifications.
+    enable_stream_desktop_notifications: bool = models.BooleanField(default=False)
+    enable_stream_email_notifications: bool = models.BooleanField(default=False)
+    enable_stream_push_notifications: bool = models.BooleanField(default=False)
+    enable_stream_audible_notifications: bool = models.BooleanField(default=False)
+    notification_sound: str = models.CharField(max_length=20, default="zulip")
+    wildcard_mentions_notify: bool = models.BooleanField(default=True)
+
+    # PM + @-mention notifications.
+    enable_desktop_notifications: bool = models.BooleanField(default=True)
+    pm_content_in_desktop_notifications: bool = models.BooleanField(default=True)
+    enable_sounds: bool = models.BooleanField(default=True)
+    enable_offline_email_notifications: bool = models.BooleanField(default=True)
+    message_content_in_email_notifications: bool = models.BooleanField(default=True)
+    enable_offline_push_notifications: bool = models.BooleanField(default=True)
+    enable_online_push_notifications: bool = models.BooleanField(default=True)
+
+    DESKTOP_ICON_COUNT_DISPLAY_MESSAGES = 1
+    DESKTOP_ICON_COUNT_DISPLAY_NOTIFIABLE = 2
+    DESKTOP_ICON_COUNT_DISPLAY_NONE = 3
+    desktop_icon_count_display: int = models.PositiveSmallIntegerField(
+        default=DESKTOP_ICON_COUNT_DISPLAY_MESSAGES
+    )
+
+    enable_digest_emails: bool = models.BooleanField(default=True)
+    enable_login_emails: bool = models.BooleanField(default=True)
+    enable_marketing_emails: bool = models.BooleanField(default=True)
+    realm_name_in_notifications: bool = models.BooleanField(default=False)
+    presence_enabled: bool = models.BooleanField(default=True)
+
+    # Define the types of the various automatically managed properties
+    property_types = dict(
+        color_scheme=int,
+        default_language=str,
+        default_view=str,
+        demote_inactive_streams=int,
+        dense_mode=bool,
+        emojiset=str,
+        fluid_layout_width=bool,
+        high_contrast_mode=bool,
+        left_side_userlist=bool,
+        starred_message_counts=bool,
+        translate_emoticons=bool,
+        twenty_four_hour_time=bool,
+    )
+
+    notification_setting_types = dict(
+        enable_desktop_notifications=bool,
+        enable_digest_emails=bool,
+        enable_login_emails=bool,
+        enable_marketing_emails=bool,
+        enable_offline_email_notifications=bool,
+        enable_offline_push_notifications=bool,
+        enable_online_push_notifications=bool,
+        enable_sounds=bool,
+        enable_stream_desktop_notifications=bool,
+        enable_stream_email_notifications=bool,
+        enable_stream_push_notifications=bool,
+        enable_stream_audible_notifications=bool,
+        wildcard_mentions_notify=bool,
+        message_content_in_email_notifications=bool,
+        notification_sound=str,
+        pm_content_in_desktop_notifications=bool,
+        desktop_icon_count_display=int,
+        realm_name_in_notifications=bool,
+        presence_enabled=bool,
+    )
+
+    class Meta:
+        abstract = True
+
+
+class RealmUserDefault(UserBaseSettings):
+    """This table stores realm-level default values for user preferences
+    like notification settings, used when creating a new user account.
+    """
+
+    id: int = models.AutoField(auto_created=True, primary_key=True, verbose_name="ID")
+    realm: Realm = models.ForeignKey(Realm, on_delete=CASCADE)
+
+
+class UserProfile(AbstractBaseUser, PermissionsMixin, UserBaseSettings):
     USERNAME_FIELD = "email"
     MAX_NAME_LENGTH = 100
     MIN_NAME_LENGTH = 2
@@ -1218,38 +1503,6 @@ class UserProfile(AbstractBaseUser, PermissionsMixin):
     # Users with this flag set can create other users via API.
     can_create_users: bool = models.BooleanField(default=False, db_index=True)
 
-    ### Notifications settings. ###
-
-    # Stream notifications.
-    enable_stream_desktop_notifications: bool = models.BooleanField(default=False)
-    enable_stream_email_notifications: bool = models.BooleanField(default=False)
-    enable_stream_push_notifications: bool = models.BooleanField(default=False)
-    enable_stream_audible_notifications: bool = models.BooleanField(default=False)
-    notification_sound: str = models.CharField(max_length=20, default="zulip")
-    wildcard_mentions_notify: bool = models.BooleanField(default=True)
-
-    # PM + @-mention notifications.
-    enable_desktop_notifications: bool = models.BooleanField(default=True)
-    pm_content_in_desktop_notifications: bool = models.BooleanField(default=True)
-    enable_sounds: bool = models.BooleanField(default=True)
-    enable_offline_email_notifications: bool = models.BooleanField(default=True)
-    message_content_in_email_notifications: bool = models.BooleanField(default=True)
-    enable_offline_push_notifications: bool = models.BooleanField(default=True)
-    enable_online_push_notifications: bool = models.BooleanField(default=True)
-
-    DESKTOP_ICON_COUNT_DISPLAY_MESSAGES = 1
-    DESKTOP_ICON_COUNT_DISPLAY_NOTIFIABLE = 2
-    DESKTOP_ICON_COUNT_DISPLAY_NONE = 3
-    desktop_icon_count_display: int = models.PositiveSmallIntegerField(
-        default=DESKTOP_ICON_COUNT_DISPLAY_MESSAGES
-    )
-
-    enable_digest_emails: bool = models.BooleanField(default=True)
-    enable_login_emails: bool = models.BooleanField(default=True)
-    enable_marketing_emails: bool = models.BooleanField(default=True)
-    realm_name_in_notifications: bool = models.BooleanField(default=False)
-    presence_enabled: bool = models.BooleanField(default=True)
-
     # Used for rate-limiting certain automated messages generated by bots
     last_reminder: Optional[datetime.datetime] = models.DateTimeField(default=None, null=True)
 
@@ -1278,43 +1531,6 @@ class UserProfile(AbstractBaseUser, PermissionsMixin):
     )
     default_all_public_streams: bool = models.BooleanField(default=False)
 
-    # UI vars
-    enter_sends: Optional[bool] = models.BooleanField(null=True, default=False)
-    left_side_userlist: bool = models.BooleanField(default=False)
-
-    # display settings
-    default_language: str = models.CharField(default="en", max_length=MAX_LANGUAGE_ID_LENGTH)
-    # This setting controls which view is rendered first when Zulip loads.
-    # Values for it are URL suffix after `#`.
-    default_view: str = models.TextField(default="recent_topics")
-    dense_mode: bool = models.BooleanField(default=True)
-    fluid_layout_width: bool = models.BooleanField(default=False)
-    high_contrast_mode: bool = models.BooleanField(default=False)
-    translate_emoticons: bool = models.BooleanField(default=False)
-    twenty_four_hour_time: bool = models.BooleanField(default=False)
-    starred_message_counts: bool = models.BooleanField(default=True)
-    COLOR_SCHEME_AUTOMATIC = 1
-    COLOR_SCHEME_NIGHT = 2
-    COLOR_SCHEME_LIGHT = 3
-    COLOR_SCHEME_CHOICES = [COLOR_SCHEME_AUTOMATIC, COLOR_SCHEME_NIGHT, COLOR_SCHEME_LIGHT]
-    color_scheme: int = models.PositiveSmallIntegerField(default=COLOR_SCHEME_AUTOMATIC)
-
-    # UI setting controlling Zulip's behavior of demoting in the sort
-    # order and graying out streams with no recent traffic.  The
-    # default behavior, automatic, enables this behavior once a user
-    # is subscribed to 30+ streams in the web app.
-    DEMOTE_STREAMS_AUTOMATIC = 1
-    DEMOTE_STREAMS_ALWAYS = 2
-    DEMOTE_STREAMS_NEVER = 3
-    DEMOTE_STREAMS_CHOICES = [
-        DEMOTE_STREAMS_AUTOMATIC,
-        DEMOTE_STREAMS_ALWAYS,
-        DEMOTE_STREAMS_NEVER,
-    ]
-    demote_inactive_streams: int = models.PositiveSmallIntegerField(
-        default=DEMOTE_STREAMS_AUTOMATIC
-    )
-
     # A timezone name from the `tzdata` database, as found in pytz.all_timezones.
     #
     # The longest existing name is 32 characters long, so max_length=40 seems
@@ -1324,21 +1540,6 @@ class UserProfile(AbstractBaseUser, PermissionsMixin):
     # for text-based fields. For more information, see
     # https://docs.djangoproject.com/en/1.10/ref/models/fields/#django.db.models.Field.null.
     timezone: str = models.CharField(max_length=40, default="")
-
-    # Emojisets
-    GOOGLE_EMOJISET = "google"
-    GOOGLE_BLOB_EMOJISET = "google-blob"
-    TEXT_EMOJISET = "text"
-    TWITTER_EMOJISET = "twitter"
-    EMOJISET_CHOICES = (
-        (GOOGLE_EMOJISET, "Google modern"),
-        (GOOGLE_BLOB_EMOJISET, "Google classic"),
-        (TWITTER_EMOJISET, "Twitter"),
-        (TEXT_EMOJISET, "Plain text"),
-    )
-    emojiset: str = models.CharField(
-        default=GOOGLE_BLOB_EMOJISET, choices=EMOJISET_CHOICES, max_length=20
-    )
 
     AVATAR_FROM_GRAVATAR = "G"
     AVATAR_FROM_USER = "U"
@@ -1373,45 +1574,6 @@ class UserProfile(AbstractBaseUser, PermissionsMixin):
     zoom_token: Optional[object] = models.JSONField(default=None, null=True)
 
     objects: UserManager = UserManager()
-
-    # Define the types of the various automatically managed properties
-    property_types = dict(
-        color_scheme=int,
-        default_language=str,
-        default_view=str,
-        demote_inactive_streams=int,
-        dense_mode=bool,
-        emojiset=str,
-        fluid_layout_width=bool,
-        high_contrast_mode=bool,
-        left_side_userlist=bool,
-        starred_message_counts=bool,
-        timezone=str,
-        translate_emoticons=bool,
-        twenty_four_hour_time=bool,
-    )
-
-    notification_setting_types = dict(
-        enable_desktop_notifications=bool,
-        enable_digest_emails=bool,
-        enable_login_emails=bool,
-        enable_marketing_emails=bool,
-        enable_offline_email_notifications=bool,
-        enable_offline_push_notifications=bool,
-        enable_online_push_notifications=bool,
-        enable_sounds=bool,
-        enable_stream_desktop_notifications=bool,
-        enable_stream_email_notifications=bool,
-        enable_stream_push_notifications=bool,
-        enable_stream_audible_notifications=bool,
-        wildcard_mentions_notify=bool,
-        message_content_in_email_notifications=bool,
-        notification_sound=str,
-        pm_content_in_desktop_notifications=bool,
-        desktop_icon_count_display=int,
-        realm_name_in_notifications=bool,
-        presence_enabled=bool,
-    )
 
     ROLE_ID_TO_NAME_MAP = {
         ROLE_REALM_OWNER: gettext_lazy("Organization owner"),
@@ -1563,9 +1725,11 @@ class UserProfile(AbstractBaseUser, PermissionsMixin):
     def has_permission(self, policy_name: str) -> bool:
         if policy_name not in [
             "create_stream_policy",
+            "edit_topic_policy",
             "invite_to_stream_policy",
             "invite_to_realm_policy",
             "move_messages_between_streams_policy",
+            "user_group_edit_policy",
         ]:
             raise AssertionError("Invalid policy")
 
@@ -1602,6 +1766,14 @@ class UserProfile(AbstractBaseUser, PermissionsMixin):
 
     def can_move_messages_between_streams(self) -> bool:
         return self.has_permission("move_messages_between_streams_policy")
+
+    def can_edit_user_groups(self) -> bool:
+        return self.has_permission("user_group_edit_policy")
+
+    def can_edit_topic_of_any_message(self) -> bool:
+        if self.realm.edit_topic_policy == Realm.POLICY_EVERYONE:
+            return True
+        return self.has_permission("edit_topic_policy")
 
     def can_access_public_streams(self) -> bool:
         return not (self.is_guest or self.realm.is_zephyr_mirror_realm)
@@ -3247,6 +3419,42 @@ class MissedMessageEmailAddress(models.Model):
         self.save(update_fields=["times_used"])
 
 
+class NotificationTriggers:
+    # "private_message" is for 1:1 PMs as well as huddles
+    PRIVATE_MESSAGE = "private_message"
+    MENTION = "mentioned"
+    WILDCARD_MENTION = "wildcard_mentioned"
+    STREAM_PUSH = "stream_push_notify"
+    STREAM_EMAIL = "stream_email_notify"
+
+
+class ScheduledMessageNotificationEmail(models.Model):
+    """Stores planned outgoing message notification emails. They may be
+    processed earlier should Zulip choose to batch multiple messages
+    in a single email, but typically will be processed just after
+    scheduled_timestamp.
+    """
+
+    user_profile: UserProfile = models.ForeignKey(UserProfile, on_delete=CASCADE)
+    message: Message = models.ForeignKey(Message, on_delete=CASCADE)
+
+    EMAIL_NOTIFICATION_TRIGGER_CHOICES = [
+        (NotificationTriggers.PRIVATE_MESSAGE, "Private message"),
+        (NotificationTriggers.MENTION, "Mention"),
+        (NotificationTriggers.WILDCARD_MENTION, "Wildcard mention"),
+        (NotificationTriggers.STREAM_EMAIL, "Stream notifications enabled"),
+    ]
+
+    trigger: str = models.TextField(choices=EMAIL_NOTIFICATION_TRIGGER_CHOICES)
+    mentioned_user_group: Optional[UserGroup] = models.ForeignKey(
+        UserGroup, null=True, on_delete=CASCADE
+    )
+
+    # Timestamp for when the notification should be processed and sent.
+    # Calculated from the time the event was received and the batching period.
+    scheduled_timestamp: datetime.datetime = models.DateTimeField(db_index=True)
+
+
 class ScheduledMessage(models.Model):
     id: int = models.AutoField(auto_created=True, primary_key=True, verbose_name="ID")
     sender: UserProfile = models.ForeignKey(UserProfile, on_delete=CASCADE)
@@ -3715,8 +3923,8 @@ def flush_realm_alert_words(realm: Realm) -> None:
     cache_delete(realm_alert_words_automaton_cache_key(realm))
 
 
-def flush_alert_word(sender: Any, **kwargs: Any) -> None:
-    realm = kwargs["instance"].realm
+def flush_alert_word(*, instance: AlertWord, **kwargs: object) -> None:
+    realm = instance.realm
     flush_realm_alert_words(realm)
 
 

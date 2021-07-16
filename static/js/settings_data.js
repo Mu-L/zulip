@@ -137,10 +137,43 @@ export function user_can_subscribe_other_users() {
     return user_has_permission(page_params.realm_invite_to_stream_policy);
 }
 
+export function user_can_unsubscribe_other_users() {
+    return page_params.is_admin;
+}
+
 export function user_can_create_streams() {
     return user_has_permission(page_params.realm_create_stream_policy);
 }
 
 export function user_can_move_messages_between_streams() {
     return user_has_permission(page_params.realm_move_messages_between_streams_policy);
+}
+
+export function user_can_edit_user_groups() {
+    return user_has_permission(page_params.realm_user_group_edit_policy);
+}
+
+export function user_can_edit_topic_of_any_message() {
+    if (
+        page_params.realm_edit_topic_policy ===
+        settings_config.common_message_policy_values.by_everyone.code
+    ) {
+        return true;
+    }
+    return user_has_permission(page_params.realm_edit_topic_policy);
+}
+
+export function using_dark_theme() {
+    if (page_params.color_scheme === settings_config.color_scheme_values.night.code) {
+        return true;
+    }
+
+    if (
+        page_params.color_scheme === settings_config.color_scheme_values.automatic.code &&
+        window.matchMedia &&
+        window.matchMedia("(prefers-color-scheme: dark)").matches
+    ) {
+        return true;
+    }
+    return false;
 }

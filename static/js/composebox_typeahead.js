@@ -12,9 +12,10 @@ import * as compose from "./compose";
 import * as compose_pm_pill from "./compose_pm_pill";
 import * as compose_state from "./compose_state";
 import * as compose_ui from "./compose_ui";
+import * as compose_validate from "./compose_validate";
 import {$t} from "./i18n";
 import * as message_store from "./message_store";
-import * as muting from "./muting";
+import * as muted_users from "./muted_users";
 import {page_params} from "./page_params";
 import * as people from "./people";
 import * as rows from "./rows";
@@ -218,7 +219,10 @@ function handle_keydown(e) {
                 // Enter
                 if (should_enter_send(e)) {
                     e.preventDefault();
-                    if (!$("#compose-send-button").prop("disabled")) {
+                    if (
+                        compose_validate.warn_for_text_overflow_when_tries_to_send() &&
+                        !$("#compose-send-button").prop("disabled")
+                    ) {
                         $("#compose-send-button").prop("disabled", true);
                         compose.finish();
                     }
@@ -354,7 +358,7 @@ function filter_mention_name(current_token) {
     } else if (current_token.startsWith("*")) {
         current_token = current_token.slice(1);
     }
-    if (current_token.length < 1 || current_token.lastIndexOf("*") !== -1) {
+    if (current_token.lastIndexOf("*") !== -1) {
         return false;
     }
 
@@ -409,10 +413,6 @@ export const slash_commands = [
         name: "poll",
     },
     {
-        text: $t({defaultMessage: "/settings (Load settings menu)"}),
-        name: "settings",
-    },
-    {
         text: $t({defaultMessage: "/todo (Create a todo list)"}),
         name: "todo",
     },
@@ -447,7 +447,7 @@ export function get_person_suggestions(query, opts) {
             persons = all_persons;
         }
         // Exclude muted users from typeaheads.
-        persons = muting.filter_muted_users(persons);
+        persons = muted_users.filter_muted_users(persons);
 
         if (opts.want_broadcast) {
             persons = persons.concat(broadcast_mentions());
@@ -648,7 +648,7 @@ export function get_candidates(query) {
             current_token = current_token.slice(1);
         }
         current_token = filter_mention_name(current_token);
-        if (!current_token) {
+        if (!current_token && typeof current_token === "boolean") {
             this.completing = null;
             return false;
         }
@@ -988,6 +988,28 @@ export function compose_trigger_selection(event) {
         return true;
     }
     return false;
+}
+
+export function initialize_topic_edit_typeahead(form_field, stream_name, dropup) {
+    const options = {
+        fixed: true,
+        dropup,
+        highlighter(item) {
+            return typeahead_helper.render_typeahead_item({primary: item});
+        },
+        sorter(items) {
+            const sorted = typeahead_helper.sorter(this.query, items, (x) => x);
+            if (sorted.length > 0 && !sorted.includes(this.query)) {
+                sorted.unshift(this.query);
+            }
+            return sorted;
+        },
+        source() {
+            return topics_seen_for(stream_name);
+        },
+        items: 5,
+    };
+    form_field.typeahead(options);
 }
 
 function get_header_html() {

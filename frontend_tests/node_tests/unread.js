@@ -12,7 +12,7 @@ page_params.realm_push_notifications_enabled = false;
 
 const {FoldDict} = zrequire("fold_dict");
 const message_store = zrequire("message_store");
-const muting = zrequire("muting");
+const muted_topics = zrequire("muted_topics");
 const people = zrequire("people");
 const stream_data = zrequire("stream_data");
 const sub_store = zrequire("sub_store");
@@ -55,10 +55,10 @@ function test_notifiable_count(home_unread_messages, expected_notifiable_count) 
 }
 
 function test(label, f) {
-    run_test(label, (override) => {
+    run_test(label, ({override}) => {
         unread.declare_bankruptcy();
-        muting.set_muted_topics([]);
-        f(override);
+        muted_topics.set_muted_topics([]);
+        f({override});
     });
 }
 
@@ -228,7 +228,7 @@ test("muting", () => {
     assert.deepEqual(unread.get_msg_ids_for_stream(stream_id), [message.id]);
     test_notifiable_count(counts.home_unread_messages, 0);
 
-    muting.add_muted_topic(social.stream_id, "test_muting");
+    muted_topics.add_muted_topic(social.stream_id, "test_muting");
     counts = unread.get_counts();
     assert.equal(counts.stream_count.get(stream_id), 0);
     assert.equal(counts.home_unread_messages, 0);
@@ -242,7 +242,7 @@ test("muting", () => {
     assert.equal(unread.num_unread_for_stream(unknown_stream_id), 0);
 });
 
-test("num_unread_for_topic", (override) => {
+test("num_unread_for_topic", ({override}) => {
     // Test the num_unread_for_topic() function using many
     // messages.
     const stream_id = 301;
@@ -315,7 +315,7 @@ test("num_unread_for_topic", (override) => {
     assert.deepEqual(msg_ids, []);
 });
 
-test("home_messages", (override) => {
+test("home_messages", ({override}) => {
     override(stream_data, "is_subscribed", () => true);
     override(stream_data, "is_muted", () => false);
 
@@ -467,7 +467,7 @@ test("mentions", () => {
 
     const muted_stream_id = 401;
 
-    muting.add_muted_topic(401, "lunch");
+    muted_topics.add_muted_topic(401, "lunch");
 
     const already_read_message = {
         id: 14,

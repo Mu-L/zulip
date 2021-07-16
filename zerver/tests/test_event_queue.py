@@ -1,5 +1,5 @@
 import time
-from typing import Any, Callable, Collection, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Collection, Dict, List
 from unittest import mock
 
 import orjson
@@ -8,6 +8,7 @@ from django.http import HttpRequest, HttpResponse
 from zerver.lib.actions import do_change_subscription_property, do_mute_topic
 from zerver.lib.test_classes import ZulipTestCase
 from zerver.lib.test_helpers import HostRequestMock, mock_queue_publish
+from zerver.lib.user_groups import create_user_group, remove_user_from_user_group
 from zerver.models import Recipient, Stream, Subscription, UserProfile, get_stream
 from zerver.tornado.event_queue import (
     ClientDescriptor,
@@ -16,6 +17,7 @@ from zerver.tornado.event_queue import (
     maybe_enqueue_notifications,
     missedmessage_hook,
     persistent_queue_filename,
+    process_notification,
 )
 from zerver.tornado.views import cleanup_event_queue, get_events
 
@@ -24,125 +26,55 @@ class MissedMessageNotificationsTest(ZulipTestCase):
     """Tests the logic for when missed-message notifications
     should be triggered, based on user settings"""
 
-    def check_will_notify(self, **kwargs: Any) -> Tuple[str, str]:
-        hamlet = self.example_user("hamlet")
-        kwargs["user_profile_id"] = hamlet.id
-        kwargs["message_id"] = 32
+    def test_maybe_enqueue_notifications(self) -> None:
+        # We've already tested the "when to send notifications" logic as part of the
+        # notification_data module.
+        # This test is for verifying whether `maybe_enqueue_notifications` returns the
+        # `already_notified` data correctly.
+        params = self.get_maybe_enqueue_notifications_parameters(
+            message_id=1, user_id=1, acting_user_id=2
+        )
 
-        # Fill up the parameters which weren't sent with defaults.
-        kwargs = self.get_maybe_enqueue_notifications_parameters(**kwargs)
-
-        email_notice = None
-        mobile_notice = None
         with mock_queue_publish(
             "zerver.tornado.event_queue.queue_json_publish"
         ) as mock_queue_json_publish:
-            notified = maybe_enqueue_notifications(**kwargs)
-            for entry in mock_queue_json_publish.call_args_list:
-                args = entry[0]
-                if args[0] == "missedmessage_mobile_notifications":
-                    mobile_notice = args[1]
-                if args[0] == "missedmessage_emails":
-                    email_notice = args[1]
+            notified = maybe_enqueue_notifications(**params)
+            mock_queue_json_publish.assert_not_called()
 
-            # Now verify the return value matches the queue actions
-            if email_notice:
-                self.assertTrue(notified["email_notified"])
-            else:
-                self.assertFalse(notified.get("email_notified", False))
-            if mobile_notice:
-                self.assertTrue(notified["push_notified"])
-            else:
-                self.assertFalse(notified.get("push_notified", False))
-        return email_notice, mobile_notice
+        with mock_queue_publish(
+            "zerver.tornado.event_queue.queue_json_publish"
+        ) as mock_queue_json_publish:
+            params["private_message"] = True
+            notified = maybe_enqueue_notifications(**params)
+            self.assertTrue(mock_queue_json_publish.call_count, 2)
 
-    def test_enqueue_notifications(self) -> None:
-        # Boring message doesn't send a notice
-        email_notice, mobile_notice = self.check_will_notify()
-        self.assertTrue(email_notice is None)
-        self.assertTrue(mobile_notice is None)
+            queues_pushed = [entry[0][0] for entry in mock_queue_json_publish.call_args_list]
+            self.assertIn("missedmessage_mobile_notifications", queues_pushed)
+            self.assertIn("missedmessage_emails", queues_pushed)
 
-        # Private message sends a notice
-        email_notice, mobile_notice = self.check_will_notify(private_message=True)
-        self.assertTrue(email_notice is not None)
-        self.assertTrue(mobile_notice is not None)
+            self.assertTrue(notified["email_notified"])
+            self.assertTrue(notified["push_notified"])
 
-        # Private message won't double-send either notice if we've
-        # already sent notices before.
-        email_notice, mobile_notice = self.check_will_notify(
-            private_message=True, already_notified={"push_notified": True, "email_notified": False}
-        )
-        self.assertTrue(email_notice is not None)
-        self.assertTrue(mobile_notice is None)
+        with mock_queue_publish(
+            "zerver.tornado.event_queue.queue_json_publish"
+        ) as mock_queue_json_publish:
+            params = self.get_maybe_enqueue_notifications_parameters(
+                message_id=1,
+                acting_user_id=2,
+                user_id=3,
+                private_message=False,
+                flags=["mentioned"],
+                mentioned=True,
+                mentioned_user_group_id=33,
+            )
+            notified = maybe_enqueue_notifications(**params)
+            self.assertTrue(mock_queue_json_publish.call_count, 2)
 
-        email_notice, mobile_notice = self.check_will_notify(
-            private_message=True, already_notified={"push_notified": False, "email_notified": True}
-        )
-        self.assertTrue(email_notice is None)
-        self.assertTrue(mobile_notice is not None)
+            push_notice = mock_queue_json_publish.call_args_list[0][0][1]
+            self.assertEqual(push_notice["mentioned_user_group_id"], 33)
 
-        # Mention sends a notice
-        email_notice, mobile_notice = self.check_will_notify(mentioned=True)
-        self.assertTrue(email_notice is not None)
-        self.assertTrue(mobile_notice is not None)
-
-        # Wildcard mention triggers both email and push notices (Like a
-        # direct mention, whether the notice is actually delivered is
-        # determined later, in the email/push notification code)
-        email_notice, mobile_notice = self.check_will_notify(wildcard_mention_notify=True)
-        self.assertTrue(email_notice is not None)
-        self.assertTrue(mobile_notice is not None)
-
-        # stream_push_notify pushes but doesn't email
-        email_notice, mobile_notice = self.check_will_notify(
-            stream_push_notify=True, stream_name="Denmark"
-        )
-        self.assertTrue(email_notice is None)
-        self.assertTrue(mobile_notice is not None)
-
-        # stream_email_notify emails but doesn't push
-        email_notice, mobile_notice = self.check_will_notify(
-            stream_email_notify=True, stream_name="Denmark"
-        )
-        self.assertTrue(email_notice is not None)
-        self.assertTrue(mobile_notice is None)
-
-        # Private message doesn't send a notice if not idle
-        email_notice, mobile_notice = self.check_will_notify(private_message=True, idle=False)
-        self.assertTrue(email_notice is None)
-        self.assertTrue(mobile_notice is None)
-
-        # Mention doesn't send a notice if not idle
-        email_notice, mobile_notice = self.check_will_notify(mentioned=True, idle=False)
-        self.assertTrue(email_notice is None)
-        self.assertTrue(mobile_notice is None)
-
-        # Wildcard mention doesn't send a notice if not idle
-        email_notice, mobile_notice = self.check_will_notify(
-            wildcard_mention_notify=True, idle=False
-        )
-        self.assertTrue(email_notice is None)
-        self.assertTrue(mobile_notice is None)
-
-        # Private message sends push but not email if not idle but online_push_enabled
-        email_notice, mobile_notice = self.check_will_notify(
-            private_message=True, online_push_enabled=True, idle=False
-        )
-        self.assertTrue(email_notice is None)
-        self.assertTrue(mobile_notice is not None)
-
-        # Stream message sends push (if enabled for that stream) but not email if not
-        # idle but online_push_enabled
-        email_notice, mobile_notice = self.check_will_notify(
-            stream_push_notify=True,
-            stream_email_notify=True,
-            stream_name="Denmark",
-            online_push_enabled=True,
-            idle=False,
-            already_notified={},
-        )
-        self.assertTrue(email_notice is None)
-        self.assertTrue(mobile_notice is not None)
+            email_notice = mock_queue_json_publish.call_args_list[1][0][1]
+            self.assertEqual(email_notice["mentioned_user_group_id"], 33)
 
     def tornado_call(
         self,
@@ -196,6 +128,7 @@ class MissedMessageNotificationsTest(ZulipTestCase):
         """Tests what arguments missedmessage_hook passes into maybe_enqueue_notifications.
         Combined with the previous test, this ensures that the missedmessage_hook is correct"""
         user_profile = self.example_user("hamlet")
+        cordelia = self.example_user("cordelia")
 
         user_profile.enable_online_push_notifications = False
         user_profile.save()
@@ -244,28 +177,17 @@ class MissedMessageNotificationsTest(ZulipTestCase):
             self.assert_json_success(result)
 
         def assert_maybe_enqueue_notifications_call_args(
-            args_list: Collection[Any],
-            user_profile_id: int,
+            args_dict: Collection[Any],
             message_id: int,
-            **kwargs: Union[bool, Dict[str, bool], Optional[str]],
+            **kwargs: Any,
         ) -> None:
-            kwargs = self.get_maybe_enqueue_notifications_parameters(**kwargs)
-            self.assertEqual(
-                args_list,
-                (
-                    user_profile_id,
-                    message_id,
-                    kwargs["private_message"],
-                    kwargs["mentioned"],
-                    kwargs["wildcard_mention_notify"],
-                    kwargs["stream_push_notify"],
-                    kwargs["stream_email_notify"],
-                    kwargs["stream_name"],
-                    kwargs["online_push_enabled"],
-                    kwargs["idle"],
-                    kwargs["already_notified"],
-                ),
+            expected_args_dict = self.get_maybe_enqueue_notifications_parameters(
+                user_id=user_profile.id,
+                acting_user_id=iago.id,
+                message_id=message_id,
+                **kwargs,
             )
+            self.assertEqual(args_dict, expected_args_dict)
 
         client_descriptor = allocate_event_queue()
         with mock.patch("zerver.tornado.event_queue.maybe_enqueue_notifications") as mock_enqueue:
@@ -282,13 +204,11 @@ class MissedMessageNotificationsTest(ZulipTestCase):
             # Now verify that we called the appropriate enqueue function
             missedmessage_hook(user_profile.id, client_descriptor, True)
             mock_enqueue.assert_called_once()
-            args_list = mock_enqueue.call_args_list[0][0]
+            args_dict = mock_enqueue.call_args_list[0][1]
 
             assert_maybe_enqueue_notifications_call_args(
-                args_list=args_list,
-                user_profile_id=user_profile.id,
+                args_dict=args_dict,
                 message_id=msg_id,
-                stream_name="Denmark",
                 already_notified={"email_notified": False, "push_notified": False},
             )
         destroy_event_queue(client_descriptor.event_queue.id)
@@ -300,11 +220,10 @@ class MissedMessageNotificationsTest(ZulipTestCase):
         with mock.patch("zerver.tornado.event_queue.maybe_enqueue_notifications") as mock_enqueue:
             missedmessage_hook(user_profile.id, client_descriptor, True)
             mock_enqueue.assert_called_once()
-            args_list = mock_enqueue.call_args_list[0][0]
+            args_dict = mock_enqueue.call_args_list[0][1]
 
             assert_maybe_enqueue_notifications_call_args(
-                args_list=args_list,
-                user_profile_id=user_profile.id,
+                args_dict=args_dict,
                 message_id=msg_id,
                 private_message=True,
                 already_notified={"email_notified": True, "push_notified": True},
@@ -320,14 +239,13 @@ class MissedMessageNotificationsTest(ZulipTestCase):
         with mock.patch("zerver.tornado.event_queue.maybe_enqueue_notifications") as mock_enqueue:
             missedmessage_hook(user_profile.id, client_descriptor, True)
             mock_enqueue.assert_called_once()
-            args_list = mock_enqueue.call_args_list[0][0]
+            args_dict = mock_enqueue.call_args_list[0][1]
 
             assert_maybe_enqueue_notifications_call_args(
-                args_list=args_list,
-                user_profile_id=user_profile.id,
+                args_dict=args_dict,
                 message_id=msg_id,
+                flags=["mentioned"],
                 mentioned=True,
-                stream_name="Denmark",
                 already_notified={"email_notified": True, "push_notified": True},
             )
         destroy_event_queue(client_descriptor.event_queue.id)
@@ -339,14 +257,13 @@ class MissedMessageNotificationsTest(ZulipTestCase):
         with mock.patch("zerver.tornado.event_queue.maybe_enqueue_notifications") as mock_enqueue:
             missedmessage_hook(user_profile.id, client_descriptor, True)
             mock_enqueue.assert_called_once()
-            args_list = mock_enqueue.call_args_list[0][0]
+            args_dict = mock_enqueue.call_args_list[0][1]
 
             assert_maybe_enqueue_notifications_call_args(
-                args_list=args_list,
-                user_profile_id=user_profile.id,
+                args_dict=args_dict,
                 message_id=msg_id,
+                flags=["wildcard_mentioned"],
                 wildcard_mention_notify=True,
-                stream_name="Denmark",
                 already_notified={"email_notified": True, "push_notified": True},
             )
         destroy_event_queue(client_descriptor.event_queue.id)
@@ -359,13 +276,12 @@ class MissedMessageNotificationsTest(ZulipTestCase):
         with mock.patch("zerver.tornado.event_queue.maybe_enqueue_notifications") as mock_enqueue:
             missedmessage_hook(user_profile.id, client_descriptor, True)
             mock_enqueue.assert_called_once()
-            args_list = mock_enqueue.call_args_list[0][0]
+            args_dict = mock_enqueue.call_args_list[0][1]
 
             assert_maybe_enqueue_notifications_call_args(
-                args_list=args_list,
-                user_profile_id=user_profile.id,
+                args_dict=args_dict,
+                flags=["wildcard_mentioned"],
                 message_id=msg_id,
-                stream_name="Denmark",
                 already_notified={"email_notified": False, "push_notified": False},
             )
         destroy_event_queue(client_descriptor.event_queue.id)
@@ -380,13 +296,12 @@ class MissedMessageNotificationsTest(ZulipTestCase):
         with mock.patch("zerver.tornado.event_queue.maybe_enqueue_notifications") as mock_enqueue:
             missedmessage_hook(user_profile.id, client_descriptor, True)
             mock_enqueue.assert_called_once()
-            args_list = mock_enqueue.call_args_list[0][0]
+            args_dict = mock_enqueue.call_args_list[0][1]
 
             assert_maybe_enqueue_notifications_call_args(
-                args_list=args_list,
-                user_profile_id=user_profile.id,
+                args_dict=args_dict,
                 message_id=msg_id,
-                stream_name="Denmark",
+                flags=["wildcard_mentioned"],
                 already_notified={"email_notified": False, "push_notified": False},
             )
         destroy_event_queue(client_descriptor.event_queue.id)
@@ -405,14 +320,13 @@ class MissedMessageNotificationsTest(ZulipTestCase):
         with mock.patch("zerver.tornado.event_queue.maybe_enqueue_notifications") as mock_enqueue:
             missedmessage_hook(user_profile.id, client_descriptor, True)
             mock_enqueue.assert_called_once()
-            args_list = mock_enqueue.call_args_list[0][0]
+            args_dict = mock_enqueue.call_args_list[0][1]
 
             assert_maybe_enqueue_notifications_call_args(
-                args_list=args_list,
-                user_profile_id=user_profile.id,
+                args_dict=args_dict,
                 message_id=msg_id,
+                flags=["wildcard_mentioned"],
                 wildcard_mention_notify=True,
-                stream_name="Denmark",
                 already_notified={"email_notified": True, "push_notified": True},
             )
         destroy_event_queue(client_descriptor.event_queue.id)
@@ -420,6 +334,32 @@ class MissedMessageNotificationsTest(ZulipTestCase):
         sub.wildcard_mentions_notify = None
         user_profile.save()
         sub.save()
+
+        # Test with a user group mention
+        hamlet_and_cordelia = create_user_group(
+            "hamlet_and_cordelia", [user_profile, cordelia], cordelia.realm
+        )
+        client_descriptor = allocate_event_queue()
+        self.assertTrue(client_descriptor.event_queue.empty())
+        msg_id = self.send_stream_message(
+            iago, "Denmark", content="@*hamlet_and_cordelia* what's up?"
+        )
+        with mock.patch("zerver.tornado.event_queue.maybe_enqueue_notifications") as mock_enqueue:
+            missedmessage_hook(user_profile.id, client_descriptor, True)
+            mock_enqueue.assert_called_once()
+            args_dict = mock_enqueue.call_args_list[0][1]
+
+            assert_maybe_enqueue_notifications_call_args(
+                args_dict=args_dict,
+                message_id=msg_id,
+                flags=["mentioned"],
+                mentioned=True,
+                mentioned_user_group_id=hamlet_and_cordelia.id,
+                already_notified={"email_notified": True, "push_notified": True},
+            )
+        destroy_event_queue(client_descriptor.event_queue.id)
+        remove_user_from_user_group(user_profile, hamlet_and_cordelia)
+        remove_user_from_user_group(cordelia, hamlet_and_cordelia)
 
         # Test the hook with a stream message with stream_push_notify
         change_subscription_properties(user_profile, stream, sub, {"push_notifications": True})
@@ -429,16 +369,14 @@ class MissedMessageNotificationsTest(ZulipTestCase):
         with mock.patch("zerver.tornado.event_queue.maybe_enqueue_notifications") as mock_enqueue:
             missedmessage_hook(user_profile.id, client_descriptor, True)
             mock_enqueue.assert_called_once()
-            args_list = mock_enqueue.call_args_list[0][0]
+            args_dict = mock_enqueue.call_args_list[0][1]
 
             assert_maybe_enqueue_notifications_call_args(
-                args_list=args_list,
-                user_profile_id=user_profile.id,
+                args_dict=args_dict,
                 message_id=msg_id,
                 stream_push_notify=True,
                 stream_email_notify=False,
-                stream_name="Denmark",
-                already_notified={"email_notified": False, "push_notified": False},
+                already_notified={"email_notified": False, "push_notified": True},
             )
         destroy_event_queue(client_descriptor.event_queue.id)
 
@@ -452,16 +390,14 @@ class MissedMessageNotificationsTest(ZulipTestCase):
         with mock.patch("zerver.tornado.event_queue.maybe_enqueue_notifications") as mock_enqueue:
             missedmessage_hook(user_profile.id, client_descriptor, True)
             mock_enqueue.assert_called_once()
-            args_list = mock_enqueue.call_args_list[0][0]
+            args_dict = mock_enqueue.call_args_list[0][1]
 
             assert_maybe_enqueue_notifications_call_args(
-                args_list=args_list,
-                user_profile_id=user_profile.id,
+                args_dict=args_dict,
                 message_id=msg_id,
                 stream_push_notify=False,
                 stream_email_notify=True,
-                stream_name="Denmark",
-                already_notified={"email_notified": False, "push_notified": False},
+                already_notified={"email_notified": True, "push_notified": False},
             )
         destroy_event_queue(client_descriptor.event_queue.id)
 
@@ -483,13 +419,11 @@ class MissedMessageNotificationsTest(ZulipTestCase):
         with mock.patch("zerver.tornado.event_queue.maybe_enqueue_notifications") as mock_enqueue:
             missedmessage_hook(user_profile.id, client_descriptor, True)
             mock_enqueue.assert_called_once()
-            args_list = mock_enqueue.call_args_list[0][0]
+            args_dict = mock_enqueue.call_args_list[0][1]
 
             assert_maybe_enqueue_notifications_call_args(
-                args_list=args_list,
-                user_profile_id=user_profile.id,
+                args_dict=args_dict,
                 message_id=msg_id,
-                stream_name="Denmark",
                 already_notified={"email_notified": False, "push_notified": False},
             )
         destroy_event_queue(client_descriptor.event_queue.id)
@@ -507,13 +441,11 @@ class MissedMessageNotificationsTest(ZulipTestCase):
         with mock.patch("zerver.tornado.event_queue.maybe_enqueue_notifications") as mock_enqueue:
             missedmessage_hook(user_profile.id, client_descriptor, True)
             mock_enqueue.assert_called_once()
-            args_list = mock_enqueue.call_args_list[0][0]
+            args_dict = mock_enqueue.call_args_list[0][1]
 
             assert_maybe_enqueue_notifications_call_args(
-                args_list=args_list,
-                user_profile_id=user_profile.id,
+                args_dict=args_dict,
                 message_id=msg_id,
-                stream_name="Denmark",
                 already_notified={"email_notified": False, "push_notified": False},
             )
         destroy_event_queue(client_descriptor.event_queue.id)
@@ -522,6 +454,29 @@ class MissedMessageNotificationsTest(ZulipTestCase):
         change_subscription_properties(
             user_profile, stream, sub, {"push_notifications": True, "is_muted": False}
         )
+
+        # Test the hook when the sender has been muted
+        result = self.api_post(user_profile, f"/api/v1/users/me/muted_users/{iago.id}")
+        self.assert_json_success(result)
+        client_descriptor = allocate_event_queue()
+        self.assertTrue(client_descriptor.event_queue.empty())
+        msg_id = self.send_personal_message(iago, user_profile)
+        with mock.patch("zerver.tornado.event_queue.maybe_enqueue_notifications") as mock_enqueue:
+            missedmessage_hook(user_profile.id, client_descriptor, True)
+            mock_enqueue.assert_called_once()
+            args_dict = mock_enqueue.call_args_list[0][1]
+
+            assert_maybe_enqueue_notifications_call_args(
+                args_dict=args_dict,
+                message_id=msg_id,
+                private_message=True,
+                sender_is_muted=True,
+                flags=["read"],
+                already_notified={"email_notified": False, "push_notified": False},
+            )
+        destroy_event_queue(client_descriptor.event_queue.id)
+        result = self.api_delete(user_profile, f"/api/v1/users/me/muted_users/{iago.id}")
+        self.assert_json_success(result)
 
 
 class FileReloadLogicTest(ZulipTestCase):
@@ -848,3 +803,67 @@ class EventQueueTest(ZulipTestCase):
 
         queue.prune(1)
         self.verify_to_dict_end_to_end(client)
+
+
+class SchemaMigrationsTests(ZulipTestCase):
+    def test_reformat_legacy_send_message_event(self) -> None:
+        hamlet = self.example_user("hamlet")
+        cordelia = self.example_user("cordelia")
+        othello = self.example_user("othello")
+        old_format_event = dict(
+            type="message",
+            message=1,
+            message_dict={},
+            presence_idle_user_ids=[hamlet.id, othello.id],
+        )
+        old_format_users = [
+            dict(
+                id=hamlet.id,
+                flags=["mentioned"],
+                mentioned=True,
+                online_push_enabled=True,
+                stream_push_notify=False,
+                stream_email_notify=True,
+                wildcard_mention_notify=False,
+                sender_is_muted=False,
+            ),
+            dict(
+                id=cordelia.id,
+                flags=["wildcard_mentioned"],
+                mentioned=False,
+                online_push_enabled=True,
+                stream_push_notify=True,
+                stream_email_notify=False,
+                wildcard_mention_notify=True,
+                sender_is_muted=False,
+            ),
+        ]
+        notice = dict(event=old_format_event, users=old_format_users)
+
+        expected_current_format_users = [
+            dict(
+                id=hamlet.id,
+                flags=["mentioned"],
+            ),
+            dict(
+                id=cordelia.id,
+                flags=["wildcard_mentioned"],
+            ),
+        ]
+
+        expected_current_format_event = dict(
+            type="message",
+            message=1,
+            message_dict={},
+            presence_idle_user_ids=[hamlet.id, othello.id],
+            online_push_user_ids=[hamlet.id, cordelia.id],
+            stream_push_user_ids=[cordelia.id],
+            stream_email_user_ids=[hamlet.id],
+            wildcard_mention_user_ids=[cordelia.id],
+            muted_sender_user_ids=[],
+        )
+        with mock.patch("zerver.tornado.event_queue.process_message_event") as m:
+            process_notification(notice)
+            m.assert_called_once()
+            self.assertDictEqual(m.call_args[0][0], expected_current_format_event)
+            self.assertEqual(m.call_args[0][1], expected_current_format_users)

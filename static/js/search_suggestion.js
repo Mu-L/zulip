@@ -481,6 +481,11 @@ function get_is_filter_suggestions(last, operators) {
             description: "unread messages",
             invalid: [{operator: "is", operand: "unread"}],
         },
+        {
+            search_string: "is:resolved",
+            description: "topics marked as resolved",
+            invalid: [{operator: "is", operand: "resolved"}],
+        },
     ];
     return get_special_filter_suggestions(last, operators, suggestions);
 }
@@ -507,6 +512,10 @@ function get_has_filter_suggestions(last, operators) {
 }
 
 function get_sent_by_me_suggestions(last, operators) {
+    if (page_params.is_spectator) {
+        return [];
+    }
+
     const last_string = Filter.unparse([last]).toLowerCase();
     const negated = last.negated || (last.operator === "search" && last.operand[0] === "-");
     const negated_symbol = negated ? "-" : "";

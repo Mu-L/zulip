@@ -2,11 +2,9 @@
 
 const {strict: assert} = require("assert");
 
-const {mock_cjs, mock_esm, set_global, zrequire} = require("../zjsunit/namespace");
+const {mock_esm, set_global, zrequire} = require("../zjsunit/namespace");
 const {run_test} = require("../zjsunit/test");
-const $ = require("../zjsunit/zjquery");
 
-mock_cjs("jquery", $);
 mock_esm("../../static/js/resize", {
     resize_stream_filters_container: () => {},
 });
@@ -50,7 +48,7 @@ set_global("setTimeout", (f, t) => {
     f();
 });
 
-mock_esm("../../static/js/muting", {
+mock_esm("../../static/js/muted_topics", {
     is_topic_muted: () => false,
 });
 

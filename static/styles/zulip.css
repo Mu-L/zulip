@@ -37,6 +37,8 @@ html {
 }
 
 body {
+    font-size: 14px;
+    line-height: calc(20 / 14);
     font-family: "Source Sans 3", sans-serif;
 }
 
@@ -141,10 +143,6 @@ p.n-margin {
 
 .border-radius {
     border-radius: 4px;
-}
-
-.modal-backdrop {
-    z-index: 102;
 }
 
 .history-limited-box {
@@ -836,6 +834,8 @@ td.pointer {
     right: -105px;
     line-height: 20px;
     text-align: right;
+    /* Disable blue link styling for the message timestamp link. */
+    color: hsl(0, 0%, 20%);
     transition: background-color 1.5s ease-in, color 1.5s ease-in;
 }
 
@@ -1053,23 +1053,6 @@ td.pointer {
         border-width: 11px 0 11px 5px;
         border-color: inherit;
         z-index: 2;
-        transform: scale(0.9999);
-    }
-
-    &::before {
-        left: 100%;
-        top: 50%;
-        content: " ";
-        height: 0;
-        width: 0;
-        position: absolute;
-        pointer-events: none;
-        margin-top: -14px;
-        border-style: solid;
-        border-width: 14px 0 14px 6px;
-        border-color: hsla(0, 0%, 0%, 0) hsla(0, 0%, 0%, 0) hsla(0, 0%, 0%, 0)
-            transparent;
-        z-index: 1;
         transform: scale(0.9999);
     }
 }
@@ -1297,7 +1280,6 @@ td.pointer {
     font-weight: 700;
     vertical-align: top;
     line-height: 12px;
-    margin-left: -3px;
 }
 
 .sender_name-in-status {
@@ -1338,6 +1320,8 @@ td.pointer {
     }
 }
 
+.on_hover_topic_unresolve,
+.on_hover_topic_resolve,
 .on_hover_topic_mute {
     opacity: 0.2;
     &:hover {
@@ -1484,6 +1468,25 @@ div.focused_table {
     display: inline-flex;
     margin: -10px auto -5px 10px;
     align-items: baseline;
+}
+
+.message_edit_save .loader {
+    display: none;
+    vertical-align: top;
+    position: relative;
+    height: 28px;
+    margin-top: -10px;
+    top: 6px;
+    width: 30px;
+}
+
+.edit-controls {
+    .btn-wrapper {
+        cursor: not-allowed;
+    }
+    .disable-btn {
+        pointer-events: none;
+    }
 }
 
 .topic_edit {
@@ -1638,11 +1641,17 @@ div.focused_table {
 }
 
 .search_icon {
-    color: hsl(0, 0%, 80%);
+    /* These rules match the .dropdown-toggle CSS for the gear menu. */
+    color: inherit;
+    opacity: 0.5;
     text-decoration: none;
     &:hover {
-        color: hsl(0, 0%, 0%);
+        opacity: 1;
     }
+}
+
+.deactivated-pill {
+    background-color: hsl(0, 86%, 86%) !important;
 }
 
 #message_view_header {
@@ -1791,13 +1800,10 @@ div.focused_table {
        last element is either the narrow description (for stream narrows) or
        the "title" (for other narrows). The flex-grow property ensures these
        elements take up the entirety of the white space. */
-    > :nth-last-child(2) {
+    .navbar-click-opens-search {
         flex-grow: 1;
 
-        /* We extend the clickable area for the search_closed icon over the
-           2nd last navbar element for better design (user convenience) this
-           selector makes it so mousing over that element also gives the user
-           a visual cue about the results of clicking the element */
+        /* Provide the visual cue that clicking this will work as expected. */
         cursor: pointer;
         &:hover + .search_closed {
             color: hsl(0, 0%, 0%);
@@ -2015,6 +2021,11 @@ div.focused_table {
     /* border-right: 2px solid hsl(204, 20%, 74%); */
 }
 
+.hide-streamlist-toggle-visibility,
+.hide-navbar-buttons-visibility {
+    visibility: hidden;
+}
+
 #streamlist-toggle-button {
     text-decoration: none;
     color: hsl(0, 0%, 52%);
@@ -2154,10 +2165,6 @@ nav {
     }
 }
 
-.modal-bg {
-    background-color: hsl(0, 0%, 98%);
-}
-
 div.floating_recipient {
     border-collapse: separate;
     width: 100%;
@@ -2277,16 +2284,6 @@ div.floating_recipient {
         outline: none;
     }
 
-    &.small_square_check {
-        background-color: hsl(166, 35%, 57%);
-        color: hsl(0, 0%, 95%);
-
-        &:hover {
-            background-color: hsl(156, 30%, 50%);
-            color: hsl(0, 0%, 100%);
-        }
-    }
-
     &.small_square_x {
         background-color: hsl(0, 0%, 100%);
         color: hsl(0, 0%, 47%);
@@ -2321,26 +2318,8 @@ div.topic_edit_spinner .loading_indicator_spinner {
     height: 20px;
 }
 
-.topic_move_spinner,
-#confirm_dialog_spinner {
+.topic_move_spinner {
     margin: 0 auto;
-}
-
-.modal {
-    overflow: hidden;
-    margin-top: 0;
-    top: 5%;
-    /* Bootstrap uses tabindex=-1 on modals for focus and ESC handling,
-       so avoid the outline it causes */
-    outline: 0;
-
-    form {
-        margin-bottom: 0;
-    }
-}
-
-.modal-body {
-    max-height: 60vh;
 }
 
 #invitee_emails {
@@ -2553,6 +2532,16 @@ div.topic_edit_spinner .loading_indicator_spinner {
         }
     }
 
+    /* Override the default border-radius to properly align
+       the button corners with `stream_header_colorblock`. */
+    .dropdown-toggle {
+        border-radius: 1px 4px 4px 1px !important;
+    }
+
+    .stream_header_colorblock {
+        margin-bottom: 20px;
+    }
+
     textarea {
         width: 100%;
         min-width: 206px;
@@ -2622,17 +2611,6 @@ div.topic_edit_spinner .loading_indicator_spinner {
     overflow: hidden;
     transition: all 0.4s ease;
 
-    &:hover .email_tooltip {
-        visibility: visible;
-        opacity: 1;
-    }
-
-    .tooltip_holder {
-        display: none;
-        position: absolute;
-        left: 50%;
-    }
-
     i {
         cursor: pointer;
 
@@ -2653,31 +2631,6 @@ div.topic_edit_spinner .loading_indicator_spinner {
 
 .display-tooltip {
     display: block !important;
-}
-
-.email_tooltip {
-    visibility: hidden;
-    opacity: 0;
-    position: relative;
-    padding: 5px 8px;
-    left: -50%;
-    top: 10px;
-    border-radius: 6px;
-    background-color: hsl(0, 0%, 30%);
-    color: hsl(0, 0%, 100%);
-    transition: visibility 0.2s ease-out, opacity 0.2s linear;
-
-    ::after {
-        content: "";
-        position: absolute;
-        top: -47%;
-        left: 50%;
-        margin-left: -5px;
-        border-width: 7px;
-        border-style: solid;
-        border-color: transparent;
-        border-bottom: hsl(0, 0%, 30%) solid 7px;
-    }
 }
 
 .hotkey-hint {
@@ -2717,6 +2670,10 @@ select.inline_select_topic_edit {
 
     .about-zulip-logo img {
         height: 40px;
+    }
+
+    i.fa-copy {
+        cursor: pointer;
     }
 }
 

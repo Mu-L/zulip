@@ -8,7 +8,7 @@
 import json
 import os
 import re
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Set, Tuple, Union
 
 from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
 from openapi_core import create_spec
@@ -214,39 +214,83 @@ def get_openapi_fixture_description(endpoint: str, method: str, status_code: str
     return get_schema(endpoint, method, status_code)["description"]
 
 
-def generate_openapi_fixture(endpoint: str, method: str, status_code: str = "200") -> List[str]:
+def get_curl_include_exclude(endpoint: str, method: str) -> List[Dict[str, Any]]:
+    """Fetch all the kinds of parameters required for curl examples."""
+    if (
+        "x-curl-examples-parameters"
+        not in openapi_spec.openapi()["paths"][endpoint][method.lower()]
+    ):
+        return [{"type": "exclude", "parameters": {"enum": [""]}}]
+    return openapi_spec.openapi()["paths"][endpoint][method.lower()]["x-curl-examples-parameters"][
+        "oneOf"
+    ]
+
+
+def check_requires_administrator(endpoint: str, method: str) -> bool:
+    """Fetch if the endpoint requires admin config."""
+    return openapi_spec.openapi()["paths"][endpoint][method.lower()].get(
+        "x-requires-administrator", False
+    )
+
+
+def check_additional_imports(endpoint: str, method: str) -> Optional[List[str]]:
+    """Fetch the additional imports required for an endpoint."""
+    return openapi_spec.openapi()["paths"][endpoint][method.lower()].get(
+        "x-python-examples-extra-imports", None
+    )
+
+
+def get_responses_description(endpoint: str, method: str) -> str:
+    """Fetch responses description of an endpoint."""
+    return openapi_spec.openapi()["paths"][endpoint][method.lower()].get(
+        "x-response-description", ""
+    )
+
+
+def get_parameters_description(endpoint: str, method: str) -> str:
+    """Fetch parameters description of an endpoint."""
+    return openapi_spec.openapi()["paths"][endpoint][method.lower()].get(
+        "x-parameter-description", ""
+    )
+
+
+def generate_openapi_fixture(endpoint: str, method: str) -> List[str]:
     """Generate fixture to be rendered"""
     fixture = []
-    if status_code not in openapi_spec.openapi()["paths"][endpoint][method.lower()]["responses"]:
-        subschema_count = 0
-    elif (
-        "oneOf"
-        in openapi_spec.openapi()["paths"][endpoint][method.lower()]["responses"][status_code][
-            "content"
-        ]["application/json"]["schema"]
+    for status_code in sorted(
+        openapi_spec.openapi()["paths"][endpoint][method.lower()]["responses"]
     ):
-        subschema_count = len(
-            openapi_spec.openapi()["paths"][endpoint][method.lower()]["responses"][status_code][
+        if (
+            "oneOf"
+            in openapi_spec.openapi()["paths"][endpoint][method.lower()]["responses"][status_code][
                 "content"
-            ]["application/json"]["schema"]["oneOf"]
-        )
-    else:
-        subschema_count = 1
-    for subschema_index in range(subschema_count):
-        if subschema_count != 1:
-            subschema_status_code = status_code + "_" + str(subschema_index)
+            ]["application/json"]["schema"]
+        ):
+            subschema_count = len(
+                openapi_spec.openapi()["paths"][endpoint][method.lower()]["responses"][status_code][
+                    "content"
+                ]["application/json"]["schema"]["oneOf"]
+            )
         else:
-            subschema_status_code = status_code
-        fixture_dict = get_openapi_fixture(endpoint, method, subschema_status_code)
-        fixture_description = (
-            get_openapi_fixture_description(endpoint, method, subschema_status_code).strip() + ":"
-        )
-        fixture_json = json.dumps(fixture_dict, indent=4, sort_keys=True, separators=(",", ": "))
+            subschema_count = 1
+        for subschema_index in range(subschema_count):
+            if subschema_count != 1:
+                subschema_status_code = status_code + "_" + str(subschema_index)
+            else:
+                subschema_status_code = status_code
+            fixture_dict = get_openapi_fixture(endpoint, method, subschema_status_code)
+            fixture_description = (
+                get_openapi_fixture_description(endpoint, method, subschema_status_code).strip()
+                + ":"
+            )
+            fixture_json = json.dumps(
+                fixture_dict, indent=4, sort_keys=True, separators=(",", ": ")
+            )
 
-        fixture.extend(fixture_description.splitlines())
-        fixture.append("``` json")
-        fixture.extend(fixture_json.splitlines())
-        fixture.append("```")
+            fixture.extend(fixture_description.splitlines())
+            fixture.append("``` json")
+            fixture.extend(fixture_json.splitlines())
+            fixture.append("```")
     return fixture
 
 
@@ -287,7 +331,7 @@ def get_openapi_parameters(
     return parameters
 
 
-def get_openapi_return_values(endpoint: str, method: str) -> List[Dict[str, Any]]:
+def get_openapi_return_values(endpoint: str, method: str) -> Dict[str, Any]:
     operation = openapi_spec.openapi()["paths"][endpoint][method.lower()]
     schema = operation["responses"]["200"]["content"]["application/json"]["schema"]
     # In cases where we have used oneOf, the schemas only differ in examples
@@ -458,7 +502,7 @@ def likely_deprecated_parameter(parameter_description: str) -> bool:
     return "**Deprecated**" in parameter_description
 
 
-def check_deprecated_consistency(argument: Dict[str, Any], description: str) -> None:
+def check_deprecated_consistency(argument: Mapping[str, Any], description: str) -> None:
     # Test to make sure deprecated parameters are marked so.
     if likely_deprecated_parameter(description):
         assert argument["deprecated"]
@@ -477,7 +521,7 @@ SKIP_JSON = {
 def validate_request(
     url: str,
     method: str,
-    data: Dict[str, Any],
+    data: Union[str, bytes, Dict[str, Any]],
     http_headers: Dict[str, Any],
     json_url: bool,
     status_code: str,

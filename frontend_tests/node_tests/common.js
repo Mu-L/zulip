@@ -2,18 +2,16 @@
 
 const {strict: assert} = require("assert");
 
-const {mock_cjs, mock_esm, set_global, zrequire} = require("../zjsunit/namespace");
+const {mock_esm, set_global, zrequire} = require("../zjsunit/namespace");
 const {run_test} = require("../zjsunit/test");
 const $ = require("../zjsunit/zjquery");
-
-mock_cjs("jquery", $);
 
 const noop = () => {};
 
 mock_esm("tippy.js", {
-    default: (selector) => {
-        $(selector)[0]._tippy = noop;
-        $(selector)[0]._tippy.setContent = noop;
+    default: (arg) => {
+        arg._tippy = {setContent: noop};
+        return arg._tippy;
     },
 });
 
@@ -38,7 +36,7 @@ run_test("phrase_match", () => {
     assert.ok(!common.phrase_match("tes", "hostess"));
 });
 
-run_test("copy_data_attribute_value", (override) => {
+run_test("copy_data_attribute_value", ({override}) => {
     const admin_emails_val = "iago@zulip.com";
 
     const input = $.create("input");
@@ -81,7 +79,7 @@ run_test("copy_data_attribute_value", (override) => {
     assert.ok(faded_out);
 });
 
-run_test("adjust_mac_shortcuts non-mac", (override) => {
+run_test("adjust_mac_shortcuts non-mac", ({override}) => {
     override(common, "has_mac_keyboard", () => false);
 
     // The adjust_mac_shortcuts has a really simple guard
@@ -90,7 +88,7 @@ run_test("adjust_mac_shortcuts non-mac", (override) => {
     common.adjust_mac_shortcuts("selector-that-does-not-exist");
 });
 
-run_test("adjust_mac_shortcuts mac", (override) => {
+run_test("adjust_mac_shortcuts mac", ({override}) => {
     const keys_to_test_mac = new Map([
         ["Backspace", "Delete"],
         ["Enter", "Return"],

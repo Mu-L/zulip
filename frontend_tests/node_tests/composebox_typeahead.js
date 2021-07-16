@@ -2,14 +2,13 @@
 
 const {strict: assert} = require("assert");
 
-const {mock_cjs, mock_esm, set_global, with_field, zrequire} = require("../zjsunit/namespace");
+const {mock_esm, set_global, with_field, zrequire} = require("../zjsunit/namespace");
 const {run_test} = require("../zjsunit/test");
 const $ = require("../zjsunit/zjquery");
 const {page_params} = require("../zjsunit/zpage_params");
 
 const noop = () => {};
 
-mock_cjs("jquery", $);
 const channel = mock_esm("../../static/js/channel");
 const compose = mock_esm("../../static/js/compose", {
     finish: noop,
@@ -38,9 +37,8 @@ set_global("document", "document-stub");
 const emoji = zrequire("../shared/js/emoji");
 const typeahead = zrequire("../shared/js/typeahead");
 const compose_state = zrequire("compose_state");
-zrequire("templates");
 const typeahead_helper = zrequire("typeahead_helper");
-const muting = zrequire("muting");
+const muted_users = zrequire("muted_users");
 const people = zrequire("people");
 const user_groups = zrequire("user_groups");
 const stream_data = zrequire("stream_data");
@@ -163,11 +161,6 @@ const my_slash = {
     text: "translated: /my (Test)",
 };
 
-const settings_slash = {
-    name: "settings",
-    text: "translated: /settings (Load settings menu)",
-};
-
 const sweden_stream = {
     name: "Sweden",
     description: "Cold, mountains and home decor.",
@@ -285,7 +278,7 @@ const make_emoji = (emoji_dict) => ({
 });
 
 function test(label, f) {
-    run_test(label, (override) => {
+    run_test(label, ({override, mock_template}) => {
         people.init();
         user_groups.init();
 
@@ -307,13 +300,13 @@ function test(label, f) {
         user_groups.add(backend);
         user_groups.add(call_center);
 
-        muting.set_muted_users([]);
+        muted_users.set_muted_users([]);
 
-        f(override);
+        f({override, mock_template});
     });
 }
 
-test("topics_seen_for", (override) => {
+test("topics_seen_for", ({override}) => {
     override(stream_topic_history, "get_recent_topic_names", (stream_id) => {
         assert.equal(stream_id, denmark_stream.stream_id);
         return ["With Twisted Metal", "acceptance", "civil fears"];
@@ -333,7 +326,7 @@ test("topics_seen_for", (override) => {
     assert.deepEqual(ct.topics_seen_for("non-existing-stream"), []);
 });
 
-test("content_typeahead_selected", (override) => {
+test("content_typeahead_selected", ({override}) => {
     const fake_this = {
         query: "",
         $element: {},
@@ -576,9 +569,19 @@ function sorted_names_from(subs) {
     return subs.map((sub) => sub.name).sort();
 }
 
-test("initialize", (override) => {
+test("initialize", ({override, mock_template}) => {
     let expected_value;
 
+    mock_template("typeahead_list_item.hbs", true, (data, html) => {
+        assert.equal(typeof data.primary, "string");
+        if (data.has_secondary) {
+            assert.equal(typeof data.secondary, "string");
+        } else {
+            assert.equal(data.has_secondary, false);
+        }
+        assert.equal(typeof data.has_image, "boolean");
+        return html;
+    });
     override(stream_topic_history_util, "get_server_history", () => {});
 
     let stream_typeahead_called = false;
@@ -1129,7 +1132,7 @@ test("initialize", (override) => {
     assert.ok(compose_textarea_typeahead_called);
 });
 
-test("begins_typeahead", (override) => {
+test("begins_typeahead", ({override}) => {
     override(stream_topic_history_util, "get_server_history", () => {});
 
     const begin_typehead_this = {
@@ -1189,18 +1192,22 @@ test("begins_typeahead", (override) => {
     assert_stream_list(":tada: #foo");
     assert_typeahead_equals("#foo\n~~~py", lang_list);
 
-    assert_typeahead_equals("@", false);
-    assert_typeahead_equals("@_", false);
-    assert_typeahead_equals(" @", false);
-    assert_typeahead_equals(" @_", false);
+    assert_typeahead_equals("@", all_mentions);
+    assert_typeahead_equals("@_", people_only);
+    assert_typeahead_equals(" @", all_mentions);
+    assert_typeahead_equals(" @_", people_only);
+    assert_typeahead_equals("@*", all_mentions);
+    assert_typeahead_equals("@_*", people_only);
+    assert_typeahead_equals("@**", all_mentions);
+    assert_typeahead_equals("@_**", people_only);
     assert_typeahead_equals("test @**o", all_mentions);
     assert_typeahead_equals("test @_**o", people_only);
     assert_typeahead_equals("test @*o", all_mentions);
     assert_typeahead_equals("test @_*k", people_only);
     assert_typeahead_equals("test @*h", all_mentions);
     assert_typeahead_equals("test @_*h", people_only);
-    assert_typeahead_equals("test @", false);
-    assert_typeahead_equals("test @_", false);
+    assert_typeahead_equals("test @", all_mentions);
+    assert_typeahead_equals("test @_", people_only);
     assert_typeahead_equals("test no@o", false);
     assert_typeahead_equals("test no@_k", false);
     assert_typeahead_equals("@ ", false);
@@ -1363,7 +1370,7 @@ test("tokenizing", () => {
     assert.equal(ct.tokenize_compose_str("foo #streams@foo"), "#streams@foo");
 });
 
-test("content_highlighter", (override) => {
+test("content_highlighter", ({override}) => {
     let fake_this = {completing: "emoji"};
     const emoji = {emoji_name: "person shrugging", emoji_url: "¯\\_(ツ)_/¯"};
     let th_render_typeahead_item_called = false;
@@ -1510,7 +1517,6 @@ test("typeahead_results", () => {
 
     // Autocomplete by slash commands.
     assert_slash_matches("me", [me_slash]);
-    assert_slash_matches("settings", [settings_slash]);
 
     // Autocomplete stream by stream name or stream description.
     assert_stream_matches("den", [denmark_stream, sweden_stream]);
@@ -1522,7 +1528,7 @@ test("typeahead_results", () => {
     assert_stream_matches("city", [netherland_stream]);
 });
 
-test("message people", (override) => {
+test("message people", ({override}) => {
     let results;
 
     /*
@@ -1581,7 +1587,7 @@ test("muted users excluded from results", () => {
     assert.deepEqual(results, [cordelia]);
 
     // Mute Cordelia, and test that she's excluded from results.
-    muting.add_muted_user(cordelia.user_id);
+    muted_users.add_muted_user(cordelia.user_id);
     results = ct.get_person_suggestions("corde", opts);
     assert.deepEqual(results, []);
 

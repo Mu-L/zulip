@@ -3,14 +3,11 @@
 const {strict: assert} = require("assert");
 
 const {$t} = require("../zjsunit/i18n");
-const {mock_cjs, mock_esm, mock_template, zrequire} = require("../zjsunit/namespace");
+const {mock_esm, zrequire} = require("../zjsunit/namespace");
 const {run_test} = require("../zjsunit/test");
 const $ = require("../zjsunit/zjquery");
 
-mock_cjs("jquery", $);
 const channel = mock_esm("../../static/js/channel");
-
-const render_alert_word_settings_item = mock_template("settings/alert_word_settings_item.hbs");
 
 const alert_words = zrequire("alert_words");
 const alert_words_ui = zrequire("alert_words_ui");
@@ -19,7 +16,7 @@ alert_words.initialize({
     alert_words: ["foo", "bar"],
 });
 
-run_test("render_alert_words_ui", (override) => {
+run_test("render_alert_words_ui", ({mock_template}) => {
     const word_list = $("#alert_words_list");
     const appended = [];
     word_list.append = (rendered) => {
@@ -31,7 +28,7 @@ run_test("render_alert_words_ui", (override) => {
 
     alert_word_items.remove = () => {};
 
-    override(render_alert_word_settings_item, "f", (args) => "stub-" + args.word);
+    mock_template("settings/alert_word_settings_item.hbs", false, (args) => "stub-" + args.word);
 
     const new_alert_word = $("#create_alert_word_name");
     assert.ok(!new_alert_word.is_focused());
@@ -42,7 +39,7 @@ run_test("render_alert_words_ui", (override) => {
     assert.ok(new_alert_word.is_focused());
 });
 
-run_test("add_alert_word", (override) => {
+run_test("add_alert_word", ({override}) => {
     override(alert_words_ui, "render_alert_words_ui", () => {}); // we've already tested this above
 
     alert_words_ui.set_up_alert_words();
@@ -97,7 +94,7 @@ run_test("add_alert_word", (override) => {
     assert.ok(alert_word_status.visible());
 });
 
-run_test("add_alert_word_keypress", (override) => {
+run_test("add_alert_word_keypress", ({override}) => {
     override(alert_words_ui, "render_alert_words_ui", () => {});
     alert_words_ui.set_up_alert_words();
 
@@ -123,7 +120,7 @@ run_test("add_alert_word_keypress", (override) => {
     assert.ok(called);
 });
 
-run_test("remove_alert_word", (override) => {
+run_test("remove_alert_word", ({override}) => {
     override(alert_words_ui, "render_alert_words_ui", () => {});
     alert_words_ui.set_up_alert_words();
 
@@ -170,7 +167,7 @@ run_test("remove_alert_word", (override) => {
     assert.ok(alert_word_status.visible());
 });
 
-run_test("close_status_message", (override) => {
+run_test("close_status_message", ({override}) => {
     override(alert_words_ui, "render_alert_words_ui", () => {});
     alert_words_ui.set_up_alert_words();
 

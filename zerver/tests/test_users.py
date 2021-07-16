@@ -761,7 +761,7 @@ class QueryCountTest(ZulipTestCase):
 
         with queries_captured() as queries:
             with cache_tries_captured() as cache_tries:
-                with self.tornado_redirected_to_list(events, expected_num_events=7):
+                with self.tornado_redirected_to_list(events, expected_num_events=8):
                     fred = do_create_user(
                         email="fred@zulip.com",
                         password="password",
@@ -771,8 +771,8 @@ class QueryCountTest(ZulipTestCase):
                         acting_user=None,
                     )
 
-        self.assert_length(queries, 71)
-        self.assert_length(cache_tries, 22)
+        self.assert_length(queries, 83)
+        self.assert_length(cache_tries, 26)
 
         peer_add_events = [event for event in events if event["event"].get("op") == "peer_add"]
 
@@ -1966,7 +1966,7 @@ class DeleteUserTest(ZulipTestCase):
         personal_message_ids_to_hamlet = Message.objects.filter(
             recipient=hamlet_personal_recipient
         ).values_list("id", flat=True)
-        self.assertTrue(len(personal_message_ids_to_hamlet) > 0)
+        self.assertGreater(len(personal_message_ids_to_hamlet), 0)
         self.assertTrue(Message.objects.filter(sender=hamlet).exists())
 
         huddle_message_ids_from_cordelia = [
@@ -1981,7 +1981,7 @@ class DeleteUserTest(ZulipTestCase):
                 user_profile=hamlet, recipient__type=Recipient.HUDDLE
             ).values_list("recipient_id", flat=True)
         )
-        self.assertTrue(len(huddle_with_hamlet_recipient_ids) > 0)
+        self.assertGreater(len(huddle_with_hamlet_recipient_ids), 0)
 
         do_delete_user(hamlet)
 

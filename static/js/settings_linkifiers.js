@@ -4,6 +4,7 @@ import render_admin_linkifier_edit_form from "../templates/settings/admin_linkif
 import render_admin_linkifier_list from "../templates/settings/admin_linkifier_list.hbs";
 
 import * as channel from "./channel";
+import * as dialog_widget from "./dialog_widget";
 import {$t_html} from "./i18n";
 import * as ListWidget from "./list_widget";
 import * as overlays from "./overlays";
@@ -46,17 +47,64 @@ function sort_url(a, b) {
 function open_linkifier_edit_form(linkifier_id) {
     const linkifiers_list = page_params.realm_linkifiers;
     const linkifier = linkifiers_list.find((linkifier) => linkifier.id === linkifier_id);
-    const edit_form_html = render_admin_linkifier_edit_form({
+    const html_body = render_admin_linkifier_edit_form({
         linkifier_id,
         pattern: linkifier.pattern,
         url_format_string: linkifier.url_format,
     });
-    const $edit_form_div = $(edit_form_html);
-    const modal_container = $("#linkifier-edit-form-modal-container");
-    modal_container.empty().append($edit_form_div);
-    overlays.open_modal("#linkifier-edit-form-modal");
+    const modal_parent = $("#linkifier-edit-form-modal-container");
 
-    return $edit_form_div;
+    function submit_linkifier_form() {
+        const change_linkifier_button = $(".dialog_submit_button");
+        change_linkifier_button.prop("disabled", true);
+
+        const modal = $("#dialog_widget_modal");
+        const url = "/json/realm/filters/" + encodeURIComponent(linkifier_id);
+        const pattern = modal.find("#edit-linkifier-pattern").val().trim();
+        const url_format_string = modal.find("#edit-linkifier-url-format-string").val().trim();
+        const data = {pattern, url_format_string};
+        const pattern_status = modal.find("#edit-linkifier-pattern-status").expectOne();
+        const format_status = modal.find("#edit-linkifier-format-status").expectOne();
+        const dialog_error_element = modal.find("#dialog_error").expectOne();
+        const opts = {
+            success_continuation() {
+                change_linkifier_button.prop("disabled", false);
+                overlays.close_modal("#dialog_widget_modal");
+            },
+            error_continuation(xhr) {
+                change_linkifier_button.prop("disabled", false);
+                const response_text = JSON.parse(xhr.responseText);
+                if (response_text.errors !== undefined) {
+                    handle_linkifier_api_error(
+                        xhr,
+                        pattern_status,
+                        format_status,
+                        dialog_error_element,
+                    );
+                } else {
+                    // This must be `Linkifier not found` error.
+                    ui_report.error($t_html({defaultMessage: "Failed"}), xhr, dialog_error_element);
+                }
+            },
+            // Show the error message only on edit linkifier modal.
+            error_msg_element: $(),
+        };
+        settings_ui.do_settings_change(
+            channel.patch,
+            url,
+            data,
+            $("#linkifier-field-status"),
+            opts,
+        );
+    }
+
+    dialog_widget.launch({
+        html_heading: $t_html({defaultMessage: "Edit linkfiers"}),
+        parent: modal_parent,
+        html_body,
+        on_click: submit_linkifier_form,
+        fade: true,
+    });
 }
 
 function handle_linkifier_api_error(xhr, pattern_status, format_status, linkifier_status) {
@@ -150,52 +198,7 @@ export function build_page() {
 
         const btn = $(this);
         const linkifier_id = Number.parseInt(btn.attr("data-linkifier-id"), 10);
-        const modal = open_linkifier_edit_form(linkifier_id);
-
-        modal.find(".submit-linkifier-info-change").on("click", (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            const change_linkifier_button = $(".submit-linkifier-info-change");
-            change_linkifier_button.prop("disabled", true);
-
-            const url = "/json/realm/filters/" + encodeURIComponent(linkifier_id);
-            const pattern = modal.find("#edit-linkifier-pattern").val().trim();
-            const url_format_string = modal.find("#edit-linkifier-url-format-string").val().trim();
-            const data = {pattern, url_format_string};
-            const pattern_status = modal.find("#edit-linkifier-pattern-status").expectOne();
-            const format_status = modal.find("#edit-linkifier-format-status").expectOne();
-            const linkifier_status = modal.find("#edit-linkifier-status").expectOne();
-            const opts = {
-                success_continuation() {
-                    change_linkifier_button.prop("disabled", false);
-                    overlays.close_modal("#linkifier-edit-form-modal");
-                },
-                error_continuation(xhr) {
-                    change_linkifier_button.prop("disabled", false);
-                    const response_text = JSON.parse(xhr.responseText);
-                    if (response_text.errors !== undefined) {
-                        handle_linkifier_api_error(
-                            xhr,
-                            pattern_status,
-                            format_status,
-                            linkifier_status,
-                        );
-                    } else {
-                        // This must be `Linkifier not found` error.
-                        ui_report.error($t_html({defaultMessage: "Failed"}), xhr, linkifier_status);
-                    }
-                },
-                // Show the error message only on edit linkifier modal.
-                error_msg_element: $(),
-            };
-            settings_ui.do_settings_change(
-                channel.patch,
-                url,
-                data,
-                $("#linkifier-field-status"),
-                opts,
-            );
-        });
+        open_linkifier_edit_form(linkifier_id);
     });
 
     $(".organization form.admin-linkifier-form")

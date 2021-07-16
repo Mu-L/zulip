@@ -2,12 +2,12 @@
 
 const {strict: assert} = require("assert");
 
-const {mock_cjs, mock_esm, with_field, zrequire} = require("../zjsunit/namespace");
+const {mock_esm, with_field, zrequire} = require("../zjsunit/namespace");
 const {run_test} = require("../zjsunit/test");
 const $ = require("../zjsunit/zjquery");
 const {page_params} = require("../zjsunit/zpage_params");
 
-mock_cjs("jquery", $);
+const message_edit = mock_esm("../../static/js/message_edit");
 const message_store = mock_esm("../../static/js/message_store");
 
 const stream_data = zrequire("stream_data");
@@ -61,9 +61,9 @@ function make_sub(name, stream_id) {
 }
 
 function test(label, f) {
-    run_test(label, (override) => {
+    run_test(label, ({override}) => {
         stream_data.clear_subscriptions();
-        f(override);
+        f({override});
     });
 }
 
@@ -170,7 +170,7 @@ test("basics", () => {
     operators = [{operator: "is", operand: "mentioned"}];
     filter = new Filter(operators);
     assert.ok(!filter.contains_only_private_messages());
-    assert.ok(filter.can_mark_messages_read());
+    assert.ok(!filter.can_mark_messages_read());
     assert.ok(!filter.has_operator("search"));
     assert.ok(filter.can_apply_locally());
     assert.ok(filter.is_personal_filter());
@@ -202,6 +202,14 @@ test("basics", () => {
     assert.ok(filter.contains_only_private_messages());
     assert.ok(!filter.has_operator("search"));
     assert.ok(filter.can_apply_locally());
+
+    operators = [{operator: "is", operand: "resolved"}];
+    filter = new Filter(operators);
+    assert.ok(!filter.contains_only_private_messages());
+    assert.ok(filter.can_mark_messages_read());
+    assert.ok(!filter.has_operator("search"));
+    assert.ok(filter.can_apply_locally());
+    assert.ok(!filter.is_personal_filter());
 });
 
 function assert_not_mark_read_with_has_operands(additional_operators_to_test) {
@@ -242,11 +250,7 @@ function assert_not_mark_read_with_is_operands(additional_operators_to_test) {
 
     is_operator = [{operator: "is", operand: "mentioned"}];
     filter = new Filter(additional_operators_to_test.concat(is_operator));
-    if (additional_operators_to_test.length === 0) {
-        assert.ok(filter.can_mark_messages_read());
-    } else {
-        assert.ok(!filter.can_mark_messages_read());
-    }
+    assert.ok(!filter.can_mark_messages_read());
 
     is_operator = [{operator: "is", operand: "mentioned", negated: true}];
     filter = new Filter(additional_operators_to_test.concat(is_operator));
@@ -265,6 +269,18 @@ function assert_not_mark_read_with_is_operands(additional_operators_to_test) {
     assert.ok(!filter.can_mark_messages_read());
 
     is_operator = [{operator: "is", operand: "unread", negated: true}];
+    filter = new Filter(additional_operators_to_test.concat(is_operator));
+    assert.ok(!filter.can_mark_messages_read());
+
+    is_operator = [{operator: "is", operand: "resolved"}];
+    filter = new Filter(additional_operators_to_test.concat(is_operator));
+    if (additional_operators_to_test.length === 0) {
+        assert.ok(filter.can_mark_messages_read());
+    } else {
+        assert.ok(!filter.can_mark_messages_read());
+    }
+
+    is_operator = [{operator: "is", operand: "resolved", negated: true}];
     filter = new Filter(additional_operators_to_test.concat(is_operator));
     assert.ok(!filter.can_mark_messages_read());
 }
@@ -605,6 +621,12 @@ test("predicate_basics", () => {
 
     predicate = get_predicate([["in", "all"]]);
     assert.ok(predicate({}));
+
+    predicate = get_predicate([["is", "resolved"]]);
+    const resolved_topic_name = message_edit.RESOLVED_TOPIC_PREFIX + "foo";
+    assert.ok(predicate({type: "stream", topic: resolved_topic_name}));
+    assert.ok(!predicate({topic: resolved_topic_name}));
+    assert.ok(!predicate({type: "stream", topic: "foo"}));
 
     const unknown_stream_id = 999;
     predicate = get_predicate([["in", "home"]]);
@@ -1191,6 +1213,14 @@ test("can_bucket_by", () => {
     filter = new Filter(terms);
     assert.equal(filter.can_bucket_by("is-mentioned"), false);
     assert.equal(filter.can_bucket_by("is-private"), false);
+
+    terms = [{operator: "is", operand: "resolved"}];
+    filter = new Filter(terms);
+    assert.equal(filter.can_bucket_by("stream", "topic"), false);
+    assert.equal(filter.can_bucket_by("stream"), false);
+    assert.equal(filter.can_bucket_by("pm-with"), false);
+    assert.equal(filter.can_bucket_by("is-mentioned"), false);
+    assert.equal(filter.can_bucket_by("is-private"), false);
 });
 
 test("term_type", () => {
@@ -1263,7 +1293,7 @@ test("term_type", () => {
     assert.ok(!filter._build_sorted_term_types_called);
 });
 
-test("first_valid_id_from", (override) => {
+test("first_valid_id_from", ({override}) => {
     const terms = [{operator: "is", operand: "alerted"}];
 
     const filter = new Filter(terms);
@@ -1359,6 +1389,7 @@ test("navbar_helpers", () => {
     const is_starred = [{operator: "is", operand: "starred"}];
     const is_private = [{operator: "is", operand: "private"}];
     const is_mentioned = [{operator: "is", operand: "mentioned"}];
+    const is_resolved = [{operator: "is", operand: "resolved"}];
     const streams_public = [{operator: "streams", operand: "public"}];
     const stream_topic_operators = [
         {operator: "stream", operand: "foo"},
@@ -1416,6 +1447,13 @@ test("navbar_helpers", () => {
             icon: "at",
             title: "translated: Mentions",
             redirect_url_with_search: "/#narrow/is/mentioned",
+        },
+        {
+            operator: is_resolved,
+            is_common_narrow: true,
+            icon: "check",
+            title: "translated: Topics marked as resolved",
+            redirect_url_with_search: "/#narrow/topics/is/resolved",
         },
         {
             operator: stream_topic_operators,
@@ -1564,7 +1602,7 @@ test("navbar_helpers", () => {
     assert.equal(filter.generate_redirect_url(), default_redirect.redirect_url);
 });
 
-test("error_cases", (override) => {
+test("error_cases", ({override}) => {
     // This test just gives us 100% line coverage on defensive code that
     // should not be reached unless we break other code.
     override(people, "pm_with_user_ids", () => {});

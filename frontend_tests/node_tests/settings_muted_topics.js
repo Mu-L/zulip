@@ -2,16 +2,15 @@
 
 const {strict: assert} = require("assert");
 
-const {mock_cjs, mock_esm, zrequire} = require("../zjsunit/namespace");
+const {mock_esm, zrequire} = require("../zjsunit/namespace");
 const {run_test} = require("../zjsunit/test");
 const $ = require("../zjsunit/zjquery");
 
-mock_cjs("jquery", $);
-const muting_ui = mock_esm("../../static/js/muting_ui");
+const muted_topics_ui = mock_esm("../../static/js/muted_topics_ui");
 
 const settings_muted_topics = zrequire("settings_muted_topics");
 const stream_data = zrequire("stream_data");
-const muting = zrequire("muting");
+const muted_topics = zrequire("muted_topics");
 
 const noop = () => {};
 
@@ -21,11 +20,11 @@ const frontend = {
 };
 stream_data.add_sub(frontend);
 
-run_test("settings", (override) => {
-    muting.add_muted_topic(frontend.stream_id, "js", 1577836800);
+run_test("settings", ({override}) => {
+    muted_topics.add_muted_topic(frontend.stream_id, "js", 1577836800);
     let populate_list_called = false;
     override(settings_muted_topics, "populate_list", () => {
-        const opts = muting.get_muted_topics();
+        const opts = muted_topics.get_muted_topics();
         assert.deepEqual(opts, [
             {
                 date_muted: 1577836800000,
@@ -73,7 +72,7 @@ run_test("settings", (override) => {
     };
 
     let unmute_topic_called = false;
-    muting_ui.unmute_topic = (stream_id, topic) => {
+    muted_topics_ui.unmute_topic = (stream_id, topic) => {
         assert.equal(stream_id, frontend.stream_id);
         assert.equal(topic, "js");
         unmute_topic_called = true;

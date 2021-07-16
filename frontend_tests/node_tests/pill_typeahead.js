@@ -2,7 +2,7 @@
 
 const {strict: assert} = require("assert");
 
-const {zrequire, mock_esm, mock_cjs} = require("../zjsunit/namespace");
+const {zrequire, mock_esm} = require("../zjsunit/namespace");
 const {run_test} = require("../zjsunit/test");
 const blueslip = require("../zjsunit/zblueslip");
 const $ = require("../zjsunit/zjquery");
@@ -11,7 +11,6 @@ const input_pill = zrequire("input_pill");
 const pill_typeahead = zrequire("pill_typeahead");
 const noop = function () {};
 
-mock_cjs("jquery", $);
 const peer_data = zrequire("peer_data");
 const people = zrequire("people");
 const stream_data = zrequire("stream_data");
@@ -106,7 +105,13 @@ for (const sub of subs) {
     stream_data.add_sub(sub);
 }
 
-run_test("set_up", () => {
+run_test("set_up", ({mock_template}) => {
+    mock_template("input_pill.hbs", true, (data, html) => {
+        assert.equal(typeof data.id, "string");
+        assert.equal(typeof data.display_value, "string");
+        assert.equal(typeof data.has_image, "boolean");
+        return html;
+    });
     let input_pill_typeahead_called = false;
     const fake_input = $.create(".input");
     fake_input.before = noop;

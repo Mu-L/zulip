@@ -2,13 +2,10 @@
 
 const {strict: assert} = require("assert");
 
-const {mock_cjs, mock_esm, with_field, zrequire} = require("../zjsunit/namespace");
+const {with_field, zrequire} = require("../zjsunit/namespace");
 const {run_test} = require("../zjsunit/test");
 const $ = require("../zjsunit/zjquery");
 const {page_params} = require("../zjsunit/zpage_params");
-
-mock_cjs("jquery", $);
-const stream_topic_history = mock_esm("../../static/js/stream_topic_history");
 
 const hash_util = zrequire("hash_util");
 const compose_state = zrequire("compose_state");
@@ -63,6 +60,7 @@ function hide_all_empty_narrow_messages() {
         "#empty_narrow_group_private_message",
         "#silent_user",
         "#empty_search_narrow_message",
+        "#empty_narrow_resolved_topics",
     ];
     for (const selector of all_empty_narrow_messages) {
         $(selector).hide();
@@ -135,6 +133,11 @@ run_test("show_empty_narrow_message", () => {
     hide_all_empty_narrow_messages();
     narrow_banner.show_empty_narrow_message();
     assert.ok($("#no_unread_narrow_message").visible());
+
+    set_filter([["is", "resolved"]]);
+    hide_all_empty_narrow_messages();
+    narrow_banner.show_empty_narrow_message();
+    assert.ok($("#empty_narrow_resolved_topics").visible());
 
     set_filter([["pm-with", ["Yo"]]]);
     hide_all_empty_narrow_messages();
@@ -359,7 +362,7 @@ run_test("narrow_to_compose_target errors", () => {
     test();
 });
 
-run_test("narrow_to_compose_target streams", (override) => {
+run_test("narrow_to_compose_target streams", ({override}) => {
     const args = {called: false};
     override(narrow, "activate", (operators, opts) => {
         args.operators = operators;
@@ -370,7 +373,6 @@ run_test("narrow_to_compose_target streams", (override) => {
     compose_state.set_message_type("stream");
     stream_data.add_sub({name: "ROME", stream_id: 99});
     compose_state.stream_name("ROME");
-    override(stream_topic_history, "get_recent_topic_names", () => ["one", "two", "three"]);
 
     // Test with existing topic
     compose_state.topic("one");
@@ -388,7 +390,10 @@ run_test("narrow_to_compose_target streams", (override) => {
     args.called = false;
     narrow.to_compose_target();
     assert.equal(args.called, true);
-    assert.deepEqual(args.operators, [{operator: "stream", operand: "ROME"}]);
+    assert.deepEqual(args.operators, [
+        {operator: "stream", operand: "ROME"},
+        {operator: "topic", operand: "four"},
+    ]);
 
     // Test with blank topic
     compose_state.topic("");
@@ -405,7 +410,7 @@ run_test("narrow_to_compose_target streams", (override) => {
     assert.deepEqual(args.operators, [{operator: "stream", operand: "ROME"}]);
 });
 
-run_test("narrow_to_compose_target PMs", (override) => {
+run_test("narrow_to_compose_target PMs", ({override}) => {
     const args = {called: false};
     override(narrow, "activate", (operators, opts) => {
         args.operators = operators;

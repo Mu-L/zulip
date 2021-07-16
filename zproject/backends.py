@@ -67,10 +67,11 @@ from zerver.lib.avatar import avatar_url, is_avatar_new
 from zerver.lib.avatar_hash import user_avatar_content_hash
 from zerver.lib.dev_ldap_directory import init_fakeldap
 from zerver.lib.email_validation import email_allowed_for_realm, validate_email_not_already_in_realm
+from zerver.lib.exceptions import JsonableError
 from zerver.lib.mobile_auth_otp import is_valid_otp
 from zerver.lib.rate_limiter import RateLimitedObject
 from zerver.lib.redis_utils import get_dict_from_redis, get_redis_client, put_dict_in_redis
-from zerver.lib.request import JsonableError
+from zerver.lib.request import get_request_notes
 from zerver.lib.subdomains import get_subdomain
 from zerver.lib.users import check_full_name, validate_user_custom_profile_field
 from zerver.models import (
@@ -279,7 +280,9 @@ def rate_limit_auth(auth_func: AuthFuncT, *args: Any, **kwargs: Any) -> Optional
 
     request = args[1]
     username = kwargs["username"]
-    if not hasattr(request, "client") or not client_is_exempt_from_rate_limiting(request):
+    if get_request_notes(request).client is None or not client_is_exempt_from_rate_limiting(
+        request
+    ):
         # Django cycles through enabled authentication backends until one succeeds,
         # or all of them fail. If multiple backends are tried like this, we only want
         # to execute rate_limit_authentication_* once, on the first attempt:
@@ -1430,11 +1433,16 @@ def social_associate_user_helper(
     full_name = kwargs["details"].get("fullname")
     first_name = kwargs["details"].get("first_name")
     last_name = kwargs["details"].get("last_name")
-    if all(name is None for name in [full_name, first_name, last_name]) and backend.name != "apple":
-        # Apple authentication provides the user's name only the very first time a user tries to log in.
+    if all(name is None for name in [full_name, first_name, last_name]) and backend.name not in [
+        "apple",
+        "saml",
+    ]:
+        # (1) Apple authentication provides the user's name only the very first time a user tries to log in.
         # So if the user aborts login or otherwise is doing this the second time,
-        # we won't have any name data. So, this case is handled with the code below
-        # setting full name to empty string.
+        # we won't have any name data.
+        # (2) Some IdPs may not send any name value if the user doesn't have them set in the IdP's directory.
+        #
+        # The name will just default to the empty string in the code below.
 
         # We need custom code here for any social auth backends
         # that don't provide name details feature.
@@ -1555,7 +1563,7 @@ def social_auth_finish(
     validate_otp_params(mobile_flow_otp, desktop_flow_otp)
 
     if user_profile is None or user_profile.is_mirror_dummy:
-        is_signup = strategy.session_get("is_signup") == "1"
+        is_signup = strategy.session_get("is_signup") == "1" or backend.should_auto_signup()
     else:
         is_signup = False
 
@@ -1669,6 +1677,9 @@ class SocialAuthMixin(ZulipAuthMixin, ExternalAuthMethod, BaseAuth):
             # interesting enough that we should log a warning.
             self.logger.warning(str(e))
             return None
+
+    def should_auto_signup(self) -> bool:
+        return False
 
     @classmethod
     def dict_representation(cls, realm: Optional[Realm] = None) -> List[ExternalAuthMethodDictT]:
@@ -2266,6 +2277,9 @@ class SAMLAuthBackend(SocialAuthMixin, SAMLAuth):
                 if param in self.standard_relay_params:
                     self.strategy.session_set(param, value)
 
+            # We want the IdP name to be accessible from the social pipeline.
+            self.strategy.session_set("saml_idp_name", idp_name)
+
             # super().auth_complete expects to have RelayState set to the idp_name,
             # so we need to replace this param.
             post_params = self.strategy.request.POST.copy()
@@ -2334,6 +2348,15 @@ class SAMLAuthBackend(SocialAuthMixin, SAMLAuth):
 
         return result
 
+    def should_auto_signup(self) -> bool:
+        """
+        This function is meant to be called in the social pipeline or later,
+        as it requires (validated) information about the IdP name to have
+        already been store in the session.
+        """
+        idp_name = self.strategy.session_get("saml_idp_name")
+        return settings.SOCIAL_AUTH_SAML_ENABLED_IDPS[idp_name].get("auto_signup", False)
+
 
 @external_auth_method
 class GenericOpenIdConnectBackend(SocialAuthMixin, OpenIdConnectAuth):
@@ -2383,6 +2406,9 @@ class GenericOpenIdConnectBackend(SocialAuthMixin, OpenIdConnectAuth):
                 signup_url=reverse("signup-social", args=(cls.name,)),
             )
         ]
+
+    def should_auto_signup(self) -> bool:
+        return self.settings_dict.get("auto_signup", False)
 
 
 def validate_otp_params(

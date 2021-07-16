@@ -4,12 +4,10 @@ const {strict: assert} = require("assert");
 
 const _ = require("lodash");
 
-const {mock_cjs, mock_esm, zrequire} = require("../zjsunit/namespace");
+const {mock_esm, zrequire} = require("../zjsunit/namespace");
 const {run_test} = require("../zjsunit/test");
 const blueslip = require("../zjsunit/zblueslip");
 const $ = require("../zjsunit/zjquery");
-
-mock_cjs("jquery", $);
 
 const padded_widget = mock_esm("../../static/js/padded_widget");
 const message_viewport = mock_esm("../../static/js/message_viewport");
@@ -55,7 +53,7 @@ run_test("get_items", () => {
     assert.deepEqual(items, [alice_li]);
 });
 
-run_test("basics", (override) => {
+run_test("basics", ({override}) => {
     const buddy_list = new BuddyList();
     init_simulated_scrolling();
 
@@ -100,7 +98,7 @@ run_test("basics", (override) => {
     assert.equal(li, alice_li);
 });
 
-run_test("big_list", (override) => {
+run_test("big_list", ({override}) => {
     const buddy_list = new BuddyList();
     const elem = init_simulated_scrolling();
 
@@ -136,7 +134,7 @@ run_test("big_list", (override) => {
     assert.equal(chunks_inserted, 6);
 });
 
-run_test("force_render", (override) => {
+run_test("force_render", ({override}) => {
     const buddy_list = new BuddyList();
     buddy_list.render_count = 50;
 
@@ -158,7 +156,7 @@ run_test("force_render", (override) => {
     });
 });
 
-run_test("find_li w/force_render", (override) => {
+run_test("find_li w/force_render", ({override}) => {
     const buddy_list = new BuddyList();
 
     // If we call find_li w/force_render set, and the
@@ -196,7 +194,7 @@ run_test("find_li w/force_render", (override) => {
     assert.ok(shown);
 });
 
-run_test("find_li w/bad key", (override) => {
+run_test("find_li w/bad key", ({override}) => {
     const buddy_list = new BuddyList();
     override(buddy_list, "get_li_from_key", () => ({length: 0}));
 
@@ -208,7 +206,7 @@ run_test("find_li w/bad key", (override) => {
     assert.deepEqual(undefined_li, []);
 });
 
-run_test("scrolling", (override) => {
+run_test("scrolling", ({override}) => {
     const buddy_list = new BuddyList();
     init_simulated_scrolling();
 

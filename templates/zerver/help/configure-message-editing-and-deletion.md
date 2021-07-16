@@ -27,7 +27,7 @@ is highly configurable. Two things are true under any configuration:
 
 [1] Controlled by **Allow message editing**.
 
-[2] Controlled by **Users can edit the topic of any message**.
+[2] Controlled by **Who can edit topic of any message**.
 
 [3] Controlled by **Allow message deleting**.
 
@@ -58,7 +58,7 @@ You can access the message editing and deletion settings as follows.
 {settings_tab|organization-permissions}
 
 4. Under **Message editing**, configure **Allow message editing**,
-   **Users can edit the topic of any message**, and **Allow message deleting**.
+   **Who can edit topic of any message**, and **Allow message deleting**.
 
 {!save-changes.md!}
 
@@ -83,5 +83,6 @@ streams.  You can configure which roles have permission to do so:
 
 * [Disable message edit history](/help/disable-message-edit-history)
 * [Configure message retention policy](/help/message-retention-policy)
+* [Move content to another stream](/help/move-content-to-another-stream)
 * [Rename a topic](/help/rename-a-topic)
-* [Community topic edits](/help/community-topic-edits)
+* [Restrict topic editing](/help/configure-who-can-edit-topics)

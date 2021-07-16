@@ -2,11 +2,10 @@
 
 const {strict: assert} = require("assert");
 
-const {mock_cjs, mock_esm, set_global, zrequire} = require("../zjsunit/namespace");
+const {mock_esm, set_global, zrequire} = require("../zjsunit/namespace");
 const {run_test} = require("../zjsunit/test");
 const $ = require("../zjsunit/zjquery");
 
-mock_cjs("jquery", $);
 mock_esm("../../static/js/resize", {
     resize_stream_filters_container: () => {},
 });
@@ -16,7 +15,7 @@ const people = zrequire("people");
 const pm_list = zrequire("pm_list");
 const top_left_corner = zrequire("top_left_corner");
 
-run_test("narrowing", (override) => {
+run_test("narrowing", ({override}) => {
     // activating narrow
 
     let pm_expanded;
@@ -62,6 +61,12 @@ run_test("narrowing", (override) => {
     filter = new Filter([{operator: "pm-with", operand: "not@valid.com"}]);
     top_left_corner.handle_narrow_activated(filter);
     assert.ok(!pm_expanded);
+
+    pm_expanded = false;
+    people.deactivate(alice);
+    filter = new Filter([{operator: "pm-with", operand: "alice@example.com"}]);
+    top_left_corner.handle_narrow_activated(filter);
+    assert.ok(pm_expanded);
 
     filter = new Filter([{operator: "is", operand: "mentioned"}]);
     top_left_corner.handle_narrow_activated(filter);

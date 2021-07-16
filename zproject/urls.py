@@ -490,7 +490,7 @@ v1_api_and_json_patterns = [
     ),
     # Used to generate a Zoom video call URL
     rest_path("calls/zoom/create", POST=make_zoom_video_call),
-    # Used to generate a Big Blue Button video call URL
+    # Used to generate a BigBlueButton video call URL
     rest_path("calls/bigbluebutton/create", GET=get_bigbluebutton_url),
     # export/realm -> zerver.views.realm_export
     rest_path("export/realm", POST=export_realm, GET=get_realm_exports),
@@ -607,7 +607,7 @@ i18n_urls = [
     path("calls/zoom/register", register_zoom_user),
     path("calls/zoom/complete", complete_zoom_user),
     path("calls/zoom/deauthorize", deauthorize_zoom_user),
-    # Used to join a Big Blue Button video call
+    # Used to join a BigBlueButton video call
     path("calls/bigbluebutton/join", join_bigbluebutton),
     # API and integrations documentation
     path("integrations/doc-html/<integration_name>", integration_doc),
@@ -627,6 +627,7 @@ i18n_urls = [
     path("for/open-source/", landing_view, {"template_name": "zerver/for-open-source.html"}),
     path("for/research/", landing_view, {"template_name": "zerver/for-research.html"}),
     path("for/companies/", landing_view, {"template_name": "zerver/for-companies.html"}),
+    path("case-studies/tum/", landing_view, {"template_name": "zerver/tum-case-study.html"}),
     path(
         "for/working-groups-and-communities/",
         landing_view,
@@ -755,8 +756,16 @@ urls += [
     ),
     path("api/delete-stream", RedirectView.as_view(url="/api/archive-stream", permanent=True)),
     path(
+        "help/change-the-topic-of-a-message",
+        RedirectView.as_view(url="/help/rename-a-topic", permanent=True),
+    ),
+    path(
         "help/configure-missed-message-emails",
         RedirectView.as_view(url="/help/configure-message-notification-emails", permanent=True),
+    ),
+    path(
+        "help/community-topic-edits",
+        RedirectView.as_view(url="/help/configure-who-can-edit-topics", permanent=True),
     ),
     path("help/", help_documentation_view),
     path("help/<path:article>", help_documentation_view),

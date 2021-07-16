@@ -2,11 +2,10 @@
 
 const {strict: assert} = require("assert");
 
-const {mock_cjs, mock_esm, zrequire} = require("../zjsunit/namespace");
+const {mock_esm, zrequire} = require("../zjsunit/namespace");
 const {run_test} = require("../zjsunit/test");
 const $ = require("../zjsunit/zjquery");
 
-mock_cjs("jquery", $);
 const compose_actions = mock_esm("../../static/js/compose_actions");
 const people = zrequire("people");
 
@@ -17,7 +16,7 @@ let pills = {
     pill: {},
 };
 
-run_test("pills", (override) => {
+run_test("pills", ({override}) => {
     override(compose_actions, "update_placeholder_text", () => {});
 
     const othello = {
@@ -37,6 +36,10 @@ run_test("pills", (override) => {
         user_id: 3,
         full_name: "Hamlet",
     };
+
+    people.add_active_user(othello);
+    people.add_active_user(iago);
+    people.add_active_user(hamlet);
 
     people.get_realm_users = () => [iago, othello, hamlet];
 
@@ -114,6 +117,18 @@ run_test("pills", (override) => {
             assert.equal(res.user_id, iago.user_id);
             assert.equal(res.display_value, iago.full_name);
         })();
+
+        (function test_deactivated_pill() {
+            people.deactivate(iago);
+            get_by_email_called = false;
+            const res = handler(iago.email, pills.items());
+            assert.ok(get_by_email_called);
+            assert.equal(typeof res, "object");
+            assert.equal(res.user_id, iago.user_id);
+            assert.equal(res.display_value, iago.full_name + " (deactivated)");
+            assert.ok(res.deactivated);
+            people.add_active_user(iago);
+        })();
     }
 
     function input_pill_stub(opts) {
@@ -153,7 +168,9 @@ run_test("pills", (override) => {
 
     const persons = [othello, iago, hamlet];
     const items = compose_pm_pill.filter_taken_users(persons);
-    assert.deepEqual(items, [{email: "iago@zulip.com", user_id: 2, full_name: "Iago"}]);
+    assert.deepEqual(items, [
+        {email: "iago@zulip.com", user_id: 2, full_name: "Iago", is_moderator: false},
+    ]);
 
     test_create_item(create_item_handler);
 

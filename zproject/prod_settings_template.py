@@ -366,6 +366,11 @@ SOCIAL_AUTH_OIDC_ENABLED_IDPS = {
         ## reads the secret with the specified name from zulip-secrets.conf.
         "client_id": "<your client id>",
         "secret": get_secret("social_auth_oidc_secret"),
+        ## Determines whether "Log in with OIDC" will automatically
+        ## register a new account if one does not already exist. By
+        ## default, Zulip asks the user whether they want to create an
+        ## account or try to log in again using another method.
+        # "auto_signup": False,
     }
 }
 
@@ -438,6 +443,12 @@ SOCIAL_AUTH_SAML_ENABLED_IDPS: Dict[str, Any] = {
         ## You can also limit subdomains by setting "attr_org_membership"
         ## to be a SAML attribute containing the allowed subdomains for a user.
         # "attr_org_membership": "member",
+        ##
+        ## Determines whether "Log in with SAML" will automatically
+        ## register a new account if one does not already exist. By
+        ## default, Zulip asks the user whether they want to create an
+        ## account or try to log in again using another method.
+        # "auto_signup": False,
     },
 }
 
@@ -631,7 +642,7 @@ SOCIAL_AUTH_SAML_SUPPORT_CONTACT = {
 ## integration, set JITSI_SERVER_URL = None.
 # JITSI_SERVER_URL = 'https://jitsi.example.com'
 
-## Controls the Big Blue Button video call integration.  You must also
+## Controls the BigBlueButton video call integration.  You must also
 ## set big_blue_button_secret in zulip-secrets.conf.
 # BIG_BLUE_BUTTON_URL = "https://bbb.example.com/bigbluebutton/"
 

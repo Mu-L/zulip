@@ -192,7 +192,7 @@ highlighting.  The system is largely managed by the code in
 * **Mypy type checker**.  Because we're using mypy in a strict mode,
   when you add use of a new Python dependency, you usually need to
   either adds stubs to the `stubs/` directory for the library, or edit
-  `mypy.ini` in the root of the Zulip project to configure
+  `pyproject.toml` in the root of the Zulip project to configure
   `ignore_missing_imports` for the new library.  See
   [our mypy docs][mypy-docs] for more details.
 
@@ -244,17 +244,14 @@ reasoning here.
 
 These are installed by `scripts/lib/install-node` (which in turn uses
 the standard third-party `nvm` installer to download `node` and pin
-its version) and `scripts/lib/third/install-yarn.sh` (the standard
-installer for `yarn`, modified to support installing to a path that is
-not the current user's home directory).
+its version) and `scripts/lib/install-yarn`.
 
 * `nvm` has its own system for installing each version of `node` at
 its own path, which we use, though we install a `/usr/local/bin/node`
 wrapper to access the desired version conveniently and efficiently
 (`nvm` has a lot of startup overhead).
-* `install-yarn.sh` is configured to install `yarn` at
-`/srv/zulip-yarn`.  We don't do anything special to try to manage
-multiple versions of `yarn`.
+* We install `yarn` at `/srv/zulip-yarn`.  We don't do anything
+special to try to manage multiple versions of `yarn`.
 
 ## ShellCheck and shfmt
 

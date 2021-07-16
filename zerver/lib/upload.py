@@ -24,7 +24,7 @@ from django.core.signing import BadSignature, TimestampSigner
 from django.http import HttpRequest
 from django.urls import reverse
 from django.utils.translation import gettext as _
-from jinja2 import Markup as mark_safe
+from jinja2.utils import Markup as mark_safe
 from PIL import ExifTags, Image, ImageOps
 from PIL.GifImagePlugin import GifImageFile
 from PIL.Image import DecompressionBombError
@@ -386,11 +386,11 @@ class S3UploadBackend(ZulipUploadBackend):
         self.avatar_bucket = get_bucket(settings.S3_AVATAR_BUCKET, self.session)
         self.uploads_bucket = get_bucket(settings.S3_AUTH_UPLOADS_BUCKET, self.session)
 
-    def get_public_upload_url(
-        self,
-        key: str,
-    ) -> str:
-        # Return the public URL for a key in the S3 Avatar bucket.
+        self._boto_client = None
+        self.public_upload_url_base = self.construct_public_upload_url_base()
+
+    def construct_public_upload_url_base(self) -> str:
+        # Return the pattern for public URL for a key in the S3 Avatar bucket.
         # For Amazon S3 itself, this will return the following:
         #     f"https://{self.avatar_bucket.name}.{network_location}/{key}"
         #
@@ -399,20 +399,49 @@ class S3UploadBackend(ZulipUploadBackend):
         # different URL format. Configuring no signature and providing
         # no access key makes `generate_presigned_url` just return the
         # normal public URL for a key.
-        config = Config(signature_version=botocore.UNSIGNED)
-        return self.session.client(
-            "s3",
-            region_name=settings.S3_REGION,
-            endpoint_url=settings.S3_ENDPOINT_URL,
-            config=config,
-        ).generate_presigned_url(
+        #
+        # It unfortunately takes 2ms per query to call
+        # generate_presigned_url, even with our cached boto
+        # client. Since we need to potentially compute hundreds of
+        # avatar URLs in single `GET /messages` request, we instead
+        # back-compute the URL pattern here.
+
+        DUMMY_KEY = "dummy_key_ignored"
+        foo_url = self.get_boto_client().generate_presigned_url(
             ClientMethod="get_object",
             Params={
                 "Bucket": self.avatar_bucket.name,
-                "Key": key,
+                "Key": DUMMY_KEY,
             },
             ExpiresIn=0,
         )
+        split_url = urllib.parse.urlsplit(foo_url)
+        assert split_url.path.endswith(f"/{DUMMY_KEY}")
+
+        return urllib.parse.urlunsplit(
+            (split_url.scheme, split_url.netloc, split_url.path[: -len(DUMMY_KEY)], "", "")
+        )
+
+    def get_public_upload_url(
+        self,
+        key: str,
+    ) -> str:
+        assert not key.startswith("/")
+        return urllib.parse.urljoin(self.public_upload_url_base, key)
+
+    def get_boto_client(self) -> botocore.client.BaseClient:
+        """
+        Creating the client takes a long time so we need to cache it.
+        """
+        if self._boto_client is None:
+            config = Config(signature_version=botocore.UNSIGNED)
+            self._boto_client = self.session.client(
+                "s3",
+                region_name=settings.S3_REGION,
+                endpoint_url=settings.S3_ENDPOINT_URL,
+                config=config,
+            )
+        return self._boto_client
 
     def delete_file_from_s3(self, path_id: str, bucket: ServiceResource) -> bool:
         key = bucket.Object(path_id)
@@ -429,12 +458,7 @@ class S3UploadBackend(ZulipUploadBackend):
         return True
 
     def get_public_upload_root_url(self) -> str:
-        # boto requires a key name, so we can't just pass "" here;
-        # trim the offending character back off from the URL we get
-        # back.
-        u = urllib.parse.urlsplit(self.get_public_upload_url("a"))
-        assert u.path.endswith("/a")
-        return urllib.parse.urlunsplit((u.scheme, u.netloc, u.path[:-1], "", ""))
+        return self.public_upload_url_base
 
     def upload_message_file(
         self,
